@@ -46,7 +46,7 @@
 - [Node.js](https://nodejs.org/) 18+
 - [Rust](https://www.rust-lang.org/tools/install) stable
 - WebView2 Runtime（Windows 11 自带，Windows 10 通常已随 Edge 安装）
-- Tauri 的 Windows 构建依赖（MSVC 工具链或 GNU 工具链均可）
+- Tauri 的 Windows 构建依赖：MSVC 工具链（Visual Studio Build Tools 的 C++ 组件）
 
 ### 启动
 
@@ -63,16 +63,18 @@ npm run build
 
 构建产物位于 `src-tauri/target/release/bundle/`。默认生成 NSIS 安装包。
 
-### 使用 GNU 工具链时
+### 工具链说明
 
-如果使用 `x86_64-pc-windows-gnu` 工具链，`ring` 等 C 依赖在部分 MSYS2 环境下会编译失败。可以改用 LLVM-MinGW 的 GCC/Clang 并在构建前指定 `CC`：
+仓库根目录的 `rust-toolchain.toml` 把工具链固定在 `stable-x86_64-pc-windows-msvc`，因此 `npm run dev` / `npm run build` 不需要额外设置 PATH 或 `CC`。
+
+不要切回 `x86_64-pc-windows-gnu`：GNU 工具链的 bfd `ld` 在链接 Tauri 的 cdylib 时会报 `error: export ordinal too large`，导出符号数量超出了 PE 序号空间，debug 构建必然触发。确实要用 GNU 工具链时，得把链接器换成 LLVM 的 `lld`：
 
 ```powershell
-$env:CC = "C:\path\to\llvm-mingw\bin\gcc.exe"
+$env:PATH = "C:\path\to\llvm-mingw\bin;" + $env:PATH
 npm run build
 ```
 
-使用 MSVC 工具链则不需要额外设置。
+从 GNU 切到 MSVC 后首次构建要重新编译全部依赖，`src-tauri/target` 里的旧产物不会被复用。
 
 ## 项目结构
 

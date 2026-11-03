@@ -1,0 +1,4 @@
+[toolchain]
+# Windows 上必须用 MSVC 工具链：windows-gnu 的 bfd ld 在链接 Tauri 的 cdylib 时会报
+# "export ordinal too large"，被导出的符号数量超过了 PE 序号空间。
+channel = "stable-x86_64-pc-windows-msvc"
