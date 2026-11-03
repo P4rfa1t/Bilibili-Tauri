@@ -1,6 +1,14 @@
 /** Application shell: titlebar, sidebar, global search, account menu, shortcuts. */
 
-import { cachedTrending, dynamicUplist, isTauri, msgUnread, searchSuggest } from "./api.js";
+import {
+  cachedTrending,
+  dynamicUplist,
+  isTauri,
+  msgUnread,
+  openPlayerWindow,
+  searchSuggest,
+  showMainWindow,
+} from "./api.js";
 import { icon, mountIcons } from "./icons.js";
 import { logoutUser, openLoginModal, refreshUser } from "./login.js";
 import * as router from "./router.js";
@@ -558,6 +566,67 @@ function initWindowControls() {
   });
 }
 
+// ------------------------------------------------------------ player window
+
+let playerWindowMode = false;
+
+/** 独立播放窗口通过 ?win=player 启动，隐藏侧栏并显示「回到主界面」。 */
+function applyWindowMode() {
+  const params = new URLSearchParams(location.search);
+  const isPlayer = params.get("win") === "player";
+  playerWindowMode = isPlayer;
+  document.body.classList.toggle("win-player", isPlayer);
+  const back = document.getElementById("back-main");
+  if (!back) return;
+  if (!isPlayer) {
+    back.remove();
+    return;
+  }
+  back.addEventListener("click", async () => {
+    try {
+      await showMainWindow();
+      const current = window.__TAURI__?.window?.getCurrentWindow;
+      if (current) await current().close();
+    } catch (error) {
+      console.error("回到主界面失败", error);
+    }
+  });
+}
+
+/** 主窗口里点视频/直播间链接，改成开独立窗口（官方客户端的手感）。 */
+function bindPlayerWindowLinks() {
+  if (!isTauri()) return;
+  document.addEventListener(
+    "click",
+    (event) => {
+      if (playerWindowMode) return;
+      if (event.defaultPrevented) return;
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      const link = event.target.closest('a[href^="#/video/"], a[href^="#/live/"]');
+      if (!link) return;
+      if (link.dataset.inline === "1") return;
+      const raw = String(link.getAttribute("href") || "").replace(/^#/, "");
+      const [pathPart, queryPart = ""] = raw.split("?");
+      const segments = pathPart.split("/").filter(Boolean).map(decodeURIComponent);
+      const kind = segments[0];
+      const id = segments[1];
+      if (!id || (kind !== "video" && kind !== "live")) return;
+      event.preventDefault();
+      const title =
+        link.getAttribute("aria-label") ||
+        link.querySelector(".video-title, .related-title, .history-title, .live-room-title")
+          ?.textContent ||
+        "";
+      openPlayerWindow(kind, id, String(title).trim(), queryPart).catch((error) => {
+        toast(errorText(error), "error");
+      });
+    },
+    true
+  );
+}
+
 // ----------------------------------------------------------------- bindings
 
 function bindAccount() {
@@ -668,6 +737,7 @@ function initShell() {
   bindAccount();
   bindSearch();
   initWindowControls();
+  applyWindowMode();
 
   sidebarToggle?.addEventListener("click", toggleSidebar);
   sidebarBackdrop?.addEventListener("click", () => setSidebarOpen(false));

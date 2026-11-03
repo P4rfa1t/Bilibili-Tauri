@@ -13,6 +13,7 @@ import {
   interactionState,
   likeVideo,
   openExternal,
+  openPlayerWindow,
   playInfo,
   reportProgress,
   subtitleCues,
@@ -218,12 +219,14 @@ export async function render(root, ctx) {
   }
 
   root.innerHTML = `<div class="watch-layout">
-    <div class="watch-main">
-      <div>${skeletonPlayer()}</div>
-      <div class="skeleton skeleton-line" style="width:64%;height:22px;margin-top:18px"></div>
-      <div class="skeleton skeleton-line short" style="width:34%;margin-top:10px"></div>
+    <div class="watch-stage">
+      <div class="watch-player">${skeletonPlayer()}</div>
     </div>
-    <div class="watch-side">${skeletonRows(4)}</div>
+    <aside class="watch-rail">
+      <div class="skeleton skeleton-line" style="width:78%;height:20px"></div>
+      <div class="skeleton skeleton-line short" style="width:44%;margin-top:10px"></div>
+      ${skeletonRows(4)}
+    </aside>
   </div>`;
 
   let disposed = false;
@@ -269,106 +272,118 @@ export async function render(root, ctx) {
   const descCollapsed = description.length > 260;
 
   root.innerHTML = `<div class="watch-layout">
-    <div class="watch-main">
+    <div class="watch-stage">
       <div class="watch-player" data-player-mount></div>
-
-      <div class="watch-head">
-        <h1 class="watch-title">${escapeHtml(info.title || "无标题")}</h1>
-        <div class="watch-meta">
-          <span>${icon("eye", 13)}${formatCount(stat.view)} 播放</span>
-          <span>${icon("message-square", 13)}${formatCount(stat.danmaku)} 弹幕</span>
-          <span class="dot"></span>
-          <span>${icon("calendar", 13)}${escapeHtml(formatDate(info.pubdate))}</span>
-          ${info.tname ? `<span class="badge badge-muted">${escapeHtml(info.tname)}</span>` : ""}
-          ${pages.length > 1 ? `<span class="badge badge-muted">${pages.length}P</span>` : ""}
-        </div>
-        <div class="watch-actions">
-          <button class="action-btn" type="button" data-act="like" title="点赞">
-            ${icon("thumbs-up", 17)}<span class="count">${formatCount(stat.like)}</span>
-          </button>
-          <button class="action-btn coin" type="button" data-act="coin" title="投币">
-            ${icon("coin", 17)}<span class="count">${formatCount(stat.coin)}</span>
-          </button>
-          <button class="action-btn" type="button" data-act="fav" title="收藏">
-            ${icon("star", 17)}<span>收藏</span>
-          </button>
-          <button class="action-btn" type="button" data-act="watchlater" title="稍后再看">
-            ${icon("clock", 17)}<span>稍后再看</span>
-          </button>
-          <span class="action-sep"></span>
-          <button class="action-btn" type="button" data-act="share" title="分享">
-            ${icon("share-2", 17)}<span>分享</span>
-          </button>
-        </div>
-      </div>
-
-      ${
-        description
-          ? `<section class="watch-desc-card">
-              <div class="watch-desc-text${descCollapsed ? " collapsed" : ""}" data-desc>${escapeHtml(
-              description
-            )}</div>
-              ${
-                descCollapsed
-                  ? `<button class="watch-desc-toggle" type="button" data-desc-toggle>展开更多</button>`
-                  : ""
-              }
-              ${
-                info.tags?.length
-                  ? `<div class="watch-tags">${(info.tags || [])
-                      .slice(0, 18)
-                      .map(
-                        (tag) =>
-                          `<a class="tag" href="#/search?q=${encodeURIComponent(
-                            tag
-                          )}">${escapeHtml(tag)}</a>`
-                      )
-                      .join("")}</div>`
-                  : ""
-              }
-            </section>`
-          : ""
-      }
-
-      <section class="up-card">
-        <div class="up-card-head">
-          <a href="#/space/${owner.mid}" aria-label="${escapeAttr(owner.name)}">
-            ${avatarTag(owner.face, owner.name, "up-avatar")}
-          </a>
-          <div style="min-width:0;flex:1">
-            <a class="up-name" href="#/space/${owner.mid}">${escapeHtml(
-    owner.name || "未知 UP 主"
-  )}</a>
-            <div class="up-sub">UID ${owner.mid} · ${formatCount(stat.favorite)} 收藏</div>
-          </div>
-        </div>
-        <div class="up-card-actions">
-          <button class="btn btn-primary" type="button" data-follow>
-            ${icon("plus", 15)}关注
-          </button>
-          <a class="btn" href="#/space/${owner.mid}">${icon("user", 15)}个人空间</a>
-        </div>
-        <div class="up-card-sign">进入 UP 主空间，浏览更多投稿视频。</div>
-      </section>
-
-      <section class="comments-card">
-        <div class="comments-head">
-          <div class="comments-title">评论
-            <span class="count" data-comment-count>${formatCount(stat.reply)}</span>
-          </div>
-          <div class="segmented" data-comment-sort>
-            <button class="active" type="button" data-sort="hot">最热</button>
-            <button type="button" data-sort="time">最新</button>
-          </div>
-        </div>
-        <div class="comment-composer-slot" data-composer-slot>${commentComposerHtml()}</div>
-        <div class="comment-list" data-comment-list>${skeletonRows(3)}</div>
-      </section>
     </div>
 
-    <aside class="watch-side">
-      ${pagesCardHtml(pages, pageIndex)}
-      ${relatedCardHtml(related)}
+    <aside class="watch-rail">
+      <div class="watch-tabs" data-watch-tabs>
+        <button class="watch-tab active" type="button" data-watch-tab="intro">简介</button>
+        <button class="watch-tab" type="button" data-watch-tab="comments">评论
+          <span class="count" data-comment-count>${formatCount(stat.reply)}</span>
+        </button>
+        <button class="watch-tab-ext" type="button" data-open-window title="在新窗口打开">${icon(
+          "external-link",
+          14
+        )}</button>
+      </div>
+
+      <div class="watch-panel" data-watch-panel="intro">
+        <div class="watch-head">
+          <h1 class="watch-title">${escapeHtml(info.title || "无标题")}</h1>
+          <div class="watch-meta">
+            <span>${icon("eye", 13)}${formatCount(stat.view)} 播放</span>
+            <span>${icon("message-square", 13)}${formatCount(stat.danmaku)} 弹幕</span>
+            <span class="dot"></span>
+            <span>${icon("calendar", 13)}${escapeHtml(formatDate(info.pubdate))}</span>
+            ${info.tname ? `<span class="badge badge-muted">${escapeHtml(info.tname)}</span>` : ""}
+            ${pages.length > 1 ? `<span class="badge badge-muted">${pages.length}P</span>` : ""}
+          </div>
+          <div class="watch-actions">
+            <button class="action-btn" type="button" data-act="like" title="点赞">
+              ${icon("thumbs-up", 17)}<span class="count">${formatCount(stat.like)}</span>
+            </button>
+            <button class="action-btn coin" type="button" data-act="coin" title="投币">
+              ${icon("coin", 17)}<span class="count">${formatCount(stat.coin)}</span>
+            </button>
+            <button class="action-btn" type="button" data-act="fav" title="收藏">
+              ${icon("star", 17)}<span>收藏</span>
+            </button>
+            <button class="action-btn" type="button" data-act="watchlater" title="稍后再看">
+              ${icon("clock", 17)}<span>稍后再看</span>
+            </button>
+            <span class="action-sep"></span>
+            <button class="action-btn" type="button" data-act="share" title="分享">
+              ${icon("share-2", 17)}<span>分享</span>
+            </button>
+          </div>
+        </div>
+
+        <section class="up-card">
+          <div class="up-card-head">
+            <a href="#/space/${owner.mid}" aria-label="${escapeAttr(owner.name)}">
+              ${avatarTag(owner.face, owner.name, "up-avatar")}
+            </a>
+            <div style="min-width:0;flex:1">
+              <a class="up-name" href="#/space/${owner.mid}">${escapeHtml(
+    owner.name || "未知 UP 主"
+  )}</a>
+              <div class="up-sub">UID ${owner.mid} · ${formatCount(stat.favorite)} 收藏</div>
+            </div>
+            <button class="btn btn-primary btn-sm up-card-follow" type="button" data-follow>
+              ${icon("plus", 14)}关注
+            </button>
+          </div>
+        </section>
+
+        ${
+          description
+            ? `<section class="watch-desc-card">
+                <div class="watch-desc-text${descCollapsed ? " collapsed" : ""}" data-desc>${escapeHtml(
+                description
+              )}</div>
+                ${
+                  descCollapsed
+                    ? `<button class="watch-desc-toggle" type="button" data-desc-toggle>展开更多</button>`
+                    : ""
+                }
+                ${
+                  info.tags?.length
+                    ? `<div class="watch-tags">${(info.tags || [])
+                        .slice(0, 18)
+                        .map(
+                          (tag) =>
+                            `<a class="tag" href="#/search?q=${encodeURIComponent(
+                              tag
+                            )}">${escapeHtml(tag)}</a>`
+                        )
+                        .join("")}</div>`
+                    : ""
+                }
+              </section>`
+            : ""
+        }
+
+        ${pagesCardHtml(pages, pageIndex)}
+      </div>
+
+      <div class="watch-panel" data-watch-panel="comments" hidden>
+        <section class="comments-card">
+          <div class="comments-head">
+            <div class="comments-title">评论</div>
+            <div class="segmented" data-comment-sort>
+              <button class="active" type="button" data-sort="hot">最热</button>
+              <button type="button" data-sort="time">最新</button>
+            </div>
+          </div>
+          <div class="comment-composer-slot" data-composer-slot>${commentComposerHtml()}</div>
+          <div class="comment-list" data-comment-list>${skeletonRows(3)}</div>
+        </section>
+      </div>
+
+      <div class="watch-rail-related">
+        ${relatedCardHtml(related)}
+      </div>
     </aside>
   </div>`;
 
@@ -384,6 +399,30 @@ export async function render(root, ctx) {
   const commentCountEl = root.querySelector("[data-comment-count]");
   const commentCard = root.querySelector(".comments-card");
   const commentSortEl = root.querySelector("[data-comment-sort]");
+  const tabsEl = root.querySelector("[data-watch-tabs]");
+
+  // 右栏「简介 / 评论」切换
+  let activeTab = "intro";
+  tabsEl?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-watch-tab]");
+    if (!button) return;
+    activeTab = button.dataset.watchTab === "comments" ? "comments" : "intro";
+    tabsEl
+      .querySelectorAll("[data-watch-tab]")
+      .forEach((item) => item.classList.toggle("active", item === button));
+    root.querySelectorAll("[data-watch-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.watchPanel !== activeTab;
+    });
+  });
+
+  // 单独开一个视频窗口
+  root.querySelector("[data-open-window]")?.addEventListener("click", async () => {
+    try {
+      await openPlayerWindow("video", bvid, info.title || "");
+    } catch (error) {
+      toast(errorText(error), "error");
+    }
+  });
 
   let liked = false;
   let likeCount = Number(stat.like) || 0;

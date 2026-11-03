@@ -22,6 +22,17 @@ export async function call(command, args = {}) {
   return invokeFn(command, args);
 }
 
+// ---------------- 独立播放窗口 ----------------
+
+/** 用独立窗口打开视频或直播间；kind 取 "video" / "live"。 */
+export function openPlayerWindow(kind, id, title = "", query = "") {
+  return call("open_player_window", { kind, id: String(id), title, query });
+}
+
+export function showMainWindow() {
+  return call("show_main_window");
+}
+
 // ---------------- Discovery ----------------
 
 export function homeFeed(kind = "popular", pn = 1, rid = 0) {

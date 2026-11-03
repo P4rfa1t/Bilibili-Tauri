@@ -83,6 +83,8 @@ pub fn run() {
             commands::live_danmu_history,
             commands::open_url,
             commands::app_version,
+            commands::open_player_window,
+            commands::show_main_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

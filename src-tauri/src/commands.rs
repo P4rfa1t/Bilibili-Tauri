@@ -616,3 +616,89 @@ pub fn open_url(url: String) -> Result<(), String> {
 pub fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
 }
+
+// ---------------- 独立播放窗口 ----------------
+
+const PLAYER_LABEL: &str = "player";
+
+fn focus_window(app: &AppHandle, label: &str) -> bool {
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return true;
+    }
+    false
+}
+
+/// 用独立播放窗口打开视频或直播间；窗口已存在时直接在里面跳转。
+#[tauri::command]
+pub async fn open_player_window(
+    app: AppHandle,
+    kind: String,
+    id: String,
+    title: String,
+    query: Option<String>,
+) -> Result<(), String> {
+    let kind = if kind == "live" { "live" } else { "video" };
+    let id = id.trim().to_string();
+    if id.is_empty() {
+        return Err("缺少要打开的目标".into());
+    }
+    let extra = query.unwrap_or_default();
+    let extra = extra.trim().trim_start_matches('?').to_string();
+    let hash = if extra.is_empty() {
+        format!("/{kind}/{id}")
+    } else {
+        format!("/{kind}/{id}?{extra}")
+    };
+    let win_title = if title.trim().is_empty() {
+        "Bilibili-Tauri".to_string()
+    } else {
+        title
+    };
+
+    if let Some(window) = app.get_webview_window(PLAYER_LABEL) {
+        let _ = window.set_title(&win_title);
+        let _ = window.eval(&format!(
+            "if (location.hash !== {hash_json}) {{ location.hash = {hash_json}; }}",
+            hash_json = serde_json::to_string(&format!("#{hash}")).unwrap_or_default()
+        ));
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+
+    let route = format!("index.html?win=player#{hash}");
+    tauri::WebviewWindowBuilder::new(&app, PLAYER_LABEL, tauri::WebviewUrl::App(route.into()))
+        .title(win_title)
+        .inner_size(1440.0, 900.0)
+        .min_inner_size(880.0, 560.0)
+        .decorations(false)
+        .shadow(true)
+        .background_color(tauri::window::Color(15, 17, 21, 255))
+        .center()
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// 聚集或新建主窗口（播放窗口里的「回到主界面」用）。
+#[tauri::command]
+pub async fn show_main_window(app: AppHandle) -> Result<(), String> {
+    if focus_window(&app, "main") {
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(&app, "main", tauri::WebviewUrl::App("index.html".into()))
+        .title("Bilibili-Tauri")
+        .inner_size(1360.0, 860.0)
+        .min_inner_size(960.0, 620.0)
+        .decorations(false)
+        .shadow(true)
+        .background_color(tauri::window::Color(15, 17, 21, 255))
+        .center()
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
