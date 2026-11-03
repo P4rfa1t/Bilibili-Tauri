@@ -2531,7 +2531,169 @@
 .live-watch-side {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* 观众发言（右栏，仿官方直播间聊天列） */
+.live-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: calc(100vh - 210px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.live-chat-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.live-chat-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.live-chat-online {
+  color: var(--text-3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.live-chat-list {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 10px 12px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.live-chat-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.live-chat-list::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.live-chat-row {
+  padding: 3px 2px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.live-chat-user {
+  color: var(--text-3);
+}
+
+.live-chat-sep {
+  color: var(--text-3);
+}
+
+.live-chat-text {
+  color: var(--text);
+}
+
+.live-chat-row:hover {
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.live-chat-medal {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font-size: 10.5px;
+  line-height: 1.5;
+  vertical-align: 1px;
+  opacity: 0.9;
+}
+
+.live-chat-admin {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--brand-soft);
+  color: var(--brand);
+  font-size: 10.5px;
+  line-height: 1.5;
+  vertical-align: 1px;
+}
+
+.live-chat-system {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.live-chat-gift-text {
+  color: #ff8fb1;
+}
+
+.live-chat-sc {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #ff6b9d, #ffa14a);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.live-chat-empty {
+  padding: 18px 8px;
+  color: var(--text-3);
+  font-size: 12px;
+  text-align: center;
+}
+
+.live-side-compact {
+  padding: 12px 13px;
+}
+
+.live-side-anchor-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.live-side-follow {
+  flex: none;
+  white-space: nowrap;
+}
+
+.live-side-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 11px;
+}
+
+.live-side-chip {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 11.5px;
+  white-space: nowrap;
 }
 
 .live-player-shell {
@@ -2888,6 +3050,10 @@
   .live-watch-side {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+
+  .live-chat {
+    height: min(420px, 52vh);
   }
 }
 

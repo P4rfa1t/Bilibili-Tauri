@@ -391,6 +391,60 @@ function playerShellHtml(play, cover) {
           ${qualityPicker(play)}`;
 }
 
+const CHAT_LIMIT = 120;
+
+/** 观众发言列表：只追加 DOM，超出上限后裁掉最老的。 */
+function appendChat(root, entry) {
+  const list = root.querySelector("[data-live-chat]");
+  if (!list) return;
+  const empty = list.querySelector("[data-live-chat-empty]");
+  empty?.remove();
+
+  const row = document.createElement("div");
+  row.className = `live-chat-row live-chat-${entry.kind || "danmu"}`;
+
+  if (entry.kind === "online") {
+    row.innerHTML = `<span class="live-chat-system">${escapeHtml(entry.text)}</span>`;
+  } else if (entry.kind === "enter") {
+    row.innerHTML = `<span class="live-chat-system">${escapeHtml(
+      entry.uname || "游客"
+    )} 进入直播间</span>`;
+  } else if (entry.kind === "gift") {
+    row.innerHTML = `<span class="live-chat-user">${escapeHtml(
+      entry.uname || ""
+    )}</span><span class="live-chat-sep">：</span><span class="live-chat-text live-chat-gift-text">${escapeHtml(
+      entry.text
+    )}</span>`;
+  } else if (entry.kind === "superchat") {
+    row.innerHTML = `<span class="live-chat-sc">¥${Number(entry.price) || 0}</span><span class="live-chat-user">${escapeHtml(
+      entry.uname || ""
+    )}</span><span class="live-chat-sep">：</span><span class="live-chat-text">${escapeHtml(
+      entry.text
+    )}</span>`;
+  } else {
+    const medal =
+      entry.medalName && entry.medalLevel
+        ? `<span class="live-chat-medal" style="border-color:${
+            entry.medalColor || "#8b98a8"
+          };color:${entry.medalColor || "#8b98a8"}">${escapeHtml(
+            entry.medalName
+          )} ${entry.medalLevel}</span>`
+        : "";
+    const admin = entry.isAdmin ? `<span class="live-chat-admin">房管</span>` : "";
+    row.innerHTML = `${medal}${admin}<span class="live-chat-user">${escapeHtml(
+      entry.uname || "游客"
+    )}</span><span class="live-chat-sep">：</span><span class="live-chat-text">${escapeHtml(
+      entry.text || ""
+    )}</span>`;
+  }
+
+  // 只有贴底时才自动滚动，用户往上翻看历史时不打断
+  const stuck = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
+  list.append(row);
+  while (list.childElementCount > CHAT_LIMIT) list.firstElementChild?.remove();
+  if (stuck) list.scrollTop = list.scrollHeight;
+}
+
 function mountPlayer(root, ctx, detail, play, roomId) {
   const stopPlayer = initPlayer(root, ctx, detail, play);
   const canvas = root.querySelector("[data-live-danmaku]");
@@ -399,6 +453,11 @@ function mountPlayer(root, ctx, detail, play, roomId) {
     danmaku = new LiveDanmaku(canvas, {
       roomId: Number(detail.room_id) || roomId,
       onStatus: (status, message) => paintDanmakuStatus(root, status, message),
+      onChat: (entry) => appendChat(root, entry),
+      onPopularity: (value) => {
+        const node = root.querySelector("[data-live-online]");
+        if (node) node.textContent = `${formatCount(value)} 人气`;
+      },
     });
     root.__liveDanmaku = danmaku;
   }
@@ -659,38 +718,39 @@ async function renderRoom(root, ctx, roomId) {
       </div>
 
       <aside class="live-watch-side">
-        <div class="live-side-card">
+        <div class="live-side-card live-side-compact">
           <div class="live-side-anchor">
             ${avatarTag(detail.face, detail.uname, "avatar avatar-lg")}
-            <div>
+            <div class="live-side-anchor-text">
               <div class="live-side-name">${escapeHtml(detail.uname || "未知主播")}</div>
               <div class="live-side-sub">${formatCount(detail.attention)} 人关注</div>
             </div>
-          </div>
-          <div class="live-side-actions">
-            <a class="btn btn-sm btn-primary" href="#/space/${Number(detail.uid) || 0}">${icon(
+            <a class="btn btn-sm btn-primary live-side-follow" href="#/space/${Number(detail.uid) || 0}">${icon(
     "user",
     14
-  )}主播主页</a>
-            <button class="btn btn-sm btn-outline" data-room-open type="button">${icon(
-              "external-link",
-              14
-            )}打开直播间</button>
+  )}主页</a>
+          </div>
+          <div class="live-side-chips">
+            <span class="live-side-chip">${escapeHtml(
+              [detail.parent_area_name, detail.area_name].filter(Boolean).join(" · ") || "未知分区"
+            )}</span>
+            <span class="live-side-chip" data-quality-dd>${escapeHtml(
+              play?.quality_desc || "自动"
+            )}</span>
+            <span class="live-side-chip">房间 ${escapeHtml(String(detail.room_id || roomId))}</span>
           </div>
         </div>
 
-        <div class="live-side-card">
-          <h3 class="live-side-title">直播信息</h3>
-          <dl class="live-side-list">
-            <div><dt>分区</dt><dd>${escapeHtml(
-              [detail.parent_area_name, detail.area_name].filter(Boolean).join(" · ") || "未知"
-            )}</dd></div>
-            <div><dt>开播时间</dt><dd>${escapeHtml(detail.live_time || "—")}</dd></div>
-            <div><dt>清晰度</dt><dd data-quality-dd>${escapeHtml(
-              play?.quality_desc || "自动"
-            )}</dd></div>
-            <div><dt>房间号</dt><dd>${escapeHtml(String(detail.room_id || roomId))}</dd></div>
-          </dl>
+        <div class="live-chat" data-live-chat-panel>
+          <div class="live-chat-head">
+            <span class="live-chat-title">${icon("message-square", 14)}观众发言</span>
+            <span class="live-chat-online" data-live-online>${formatCount(
+              detail.online
+            )} 人气</span>
+          </div>
+          <div class="live-chat-list" data-live-chat>
+            <div class="live-chat-empty" data-live-chat-empty>正在连接弹幕服务器…</div>
+          </div>
         </div>
       </aside>
     </div>

@@ -56,10 +56,12 @@ function hexColor(value) {
 }
 
 export class LiveDanmaku {
-  constructor(canvas, { roomId, onStatus } = {}) {
+  constructor(canvas, { roomId, onStatus, onChat, onPopularity } = {}) {
     this.canvas = canvas;
     this.roomId = Number(roomId) || 0;
     this.onStatus = typeof onStatus === "function" ? onStatus : null;
+    this.onChat = typeof onChat === "function" ? onChat : null;
+    this.onPopularity = typeof onPopularity === "function" ? onPopularity : null;
 
     this.startedAt = performance.now();
     this.engine = new DanmakuEngine(canvas, { getTime: () => this.now() });
@@ -138,9 +140,27 @@ export class LiveDanmaku {
   async loadHistory() {
     try {
       const history = await liveDanmuHistory(this.roomId);
-      const list = Array.isArray(history?.items) ? history.items.slice(-14) : [];
-      if (!list.length || this.destroyed) return;
-      // 历史弹幕排在接下来 6 秒里依次滚出，一进直播间就不用干等第一条
+      const all = Array.isArray(history?.items) ? history.items : [];
+      if (!all.length || this.destroyed) return;
+      // 右栏聊天列表先铺满最近 20 条，进直播间不至于空白
+      if (this.onChat) {
+        all.slice(-20).forEach((item) => {
+          const text = String(item.text || "").trim();
+          if (!text) return;
+          this.onChat({
+            kind: "danmu",
+            uname: String(item.uname || ""),
+            uid: Number(item.uid) || 0,
+            text,
+            medalName: "",
+            medalLevel: 0,
+            medalColor: "",
+            isAdmin: false,
+          });
+        });
+      }
+      // 弹幕画布补 14 条，排在接下来 6 秒里依次滚出
+      const list = all.slice(-14);
       const span = 6;
       const step = span / list.length;
       const start = this.now();
@@ -216,21 +236,64 @@ export class LiveDanmaku {
     if (cmd.startsWith("DANMU_MSG")) {
       const info = message.info || [];
       const meta = Array.isArray(info[0]) ? info[0] : [];
-      this.push(info[1], {
+      const user = Array.isArray(info[2]) ? info[2] : [];
+      const text = String(info[1] || "").trim();
+      const uname = String(user[1] || "");
+      const medal = Array.isArray(info[3]) ? info[3] : null;
+      this.push(text, {
         mode: Number(meta[1]) || 1,
         color: hexColor(meta[3]),
         size: Number(meta[2]) || 25,
       });
+      if (text && this.onChat) {
+        this.onChat({
+          kind: "danmu",
+          uname,
+          uid: Number(user[0]) || 0,
+          text,
+          // info[3] = [等级, 粉丝牌名, 主播名, 房间号, 颜色...]，只有前三位有意义
+          medalName: medal ? String(medal[1] || "") : "",
+          medalLevel: medal ? Number(medal[0]) || 0 : 0,
+          medalColor: medal ? hexColor(medal[4]) : "",
+          // 房管标记：老版在 info[7]，新版在 info[2][2]
+          isAdmin: Number(info[7]) === 1 || Number(user[2]) === 1,
+        });
+      }
       this.notifyCount();
       return;
     }
     if (cmd === "SUPER_CHAT_MESSAGE" && message.data) {
       const price = Number(message.data.price) || 0;
       const name = message.data.user_info?.uname || "";
-      this.push(`【${name} ¥${price}】${message.data.message || ""}`, {
+      const text = String(message.data.message || "");
+      this.push(`【${name} ¥${price}】${text}`, {
         mode: 1,
         color: "#ffd166",
         size: 26,
+      });
+      this.onChat?.({ kind: "superchat", uname: name, text, price });
+      return;
+    }
+    if (cmd === "SEND_GIFT" && message.data) {
+      this.onChat?.({
+        kind: "gift",
+        uname: message.data.uname || "",
+        text: `赠送 ${message.data.giftName || "礼物"} ×${Number(message.data.num) || 1}`,
+      });
+      return;
+    }
+    if (cmd === "INTERACT_WORD" && message.data) {
+      this.onChat?.({
+        kind: "enter",
+        uname: message.data.uname || "",
+        text: "进入直播间",
+      });
+      return;
+    }
+    if (cmd === "ONLINE_RANK_COUNT" && message.data) {
+      this.onChat?.({
+        kind: "online",
+        text: `在线观看 ${Number(message.data.count) || 0}`,
       });
     }
   }
