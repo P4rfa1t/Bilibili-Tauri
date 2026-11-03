@@ -162,6 +162,10 @@ export function commentReplies(aid, rpid, page = 1) {
   return call("comment_replies", { aid, rpid, page });
 }
 
+export function commentAdd(aid, message, root = 0) {
+  return call("comment_add", { aid, message, root });
+}
+
 export function spaceInfo(mid) {
   return call("space_info", { mid });
 }

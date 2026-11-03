@@ -1077,6 +1077,49 @@ impl BilibiliClient {
         })
     }
 
+    /// 发表评论。`root` 非 0 时是回复某条评论（子回复）。
+    pub async fn comment_add(
+        &self,
+        aid: i64,
+        message: &str,
+        root: i64,
+        login: &Cookies,
+    ) -> Result<CommentItem, String> {
+        let csrf = Self::require_login(login)?;
+        self.ensure_buvid(login).await;
+        let text = message.trim();
+        if text.is_empty() {
+            return Err("评论内容不能为空".into());
+        }
+        let mut form = vec![
+            ("type".to_string(), "1".to_string()),
+            ("oid".to_string(), aid.to_string()),
+            ("message".to_string(), text.to_string()),
+            ("plat".to_string(), "1".to_string()),
+            ("csrf".to_string(), csrf),
+        ];
+        if root > 0 {
+            form.push(("root".to_string(), root.to_string()));
+            form.push(("parent".to_string(), root.to_string()));
+        }
+        let d = self
+            .post_form_at(
+                "/x/v2/reply/add",
+                form,
+                login,
+                &format!("https://www.bilibili.com/video/av{aid}"),
+            )
+            .await?;
+        let rpid = num_of(&d["rpid"]);
+        let mut item = parse_comment(&d["reply"], if root > 0 { 1 } else { 0 }).unwrap_or_default();
+        if item.rpid <= 0 {
+            item.rpid = rpid;
+        }
+        item.oid = aid;
+        item.message = text.to_string();
+        Ok(item)
+    }
+
     // ---------- 登录 ----------
 
     pub async fn login_state(&self, login: &Cookies) -> Result<UserInfo, String> {

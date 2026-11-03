@@ -64,6 +64,7 @@ pub fn run() {
             commands::history_clear,
             commands::comment_like,
             commands::comment_replies,
+            commands::comment_add,
             commands::space_info,
             commands::space_videos,
             commands::bangumi_list,

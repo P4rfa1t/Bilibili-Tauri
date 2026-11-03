@@ -407,6 +407,20 @@ pub async fn comment_replies(
         .await
 }
 
+#[tauri::command]
+pub async fn comment_add(
+    state: State<'_, AppState>,
+    aid: i64,
+    message: String,
+    root: Option<i64>,
+) -> Result<CommentItem, String> {
+    let login = login_of(&state);
+    state
+        .client
+        .comment_add(aid, &message, root.unwrap_or(0), &login)
+        .await
+}
+
 // ---------------- 用户空间 ----------------
 
 #[tauri::command]

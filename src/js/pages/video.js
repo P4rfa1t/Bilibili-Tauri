@@ -3,6 +3,7 @@ import {
   coinVideo,
   commentLike,
   commentReplies,
+  commentAdd,
   comments as fetchComments,
   createFavoriteFolder,
   danmaku as fetchDanmaku,
@@ -61,7 +62,9 @@ function resumeSeconds(play) {
 }
 
 function replyHtml(reply) {
-  return `<div class="comment-reply">
+  return `<div class="comment-reply" data-sub-rpid="${Number(reply.rpid) || 0}" data-sub-mid="${
+    Number(reply.mid) || 0
+  }" data-sub-name="${escapeAttr(reply.name || "")}">
     ${avatarTag(reply.avatar, reply.name, "avatar avatar-sm")}
     <div class="comment-main">
       <div class="comment-head">
@@ -73,6 +76,9 @@ function replyHtml(reply) {
       </div>
       <div class="comment-text">${escapeHtml(reply.message || "")}</div>
     </div>
+    <button class="comment-reply-btn" type="button" data-reply-to="${Number(reply.rpid) || 0}" data-reply-name="${escapeAttr(
+    reply.name || ""
+  )}">回复</button>
   </div>`;
 }
 
@@ -82,6 +88,7 @@ function commentHtml(item) {
   const rpid = Number(item.rpid) || 0;
   const replyCount = Number(item.reply_count) || 0;
   const hasMoreReplies = replyCount > replies.length;
+  const liked = Number(item.like_action) === 1;
   return `<article class="comment" data-rpid="${rpid}" data-oid="${Number(item.oid) || 0}">
     ${avatarTag(item.avatar, item.name, "avatar avatar-sm")}
     <div class="comment-main">
@@ -106,8 +113,14 @@ function commentHtml(item) {
           : ""
       }
       <div class="comment-actions">
-        <button class="comment-action like-btn${Number(item.like_action) === 1 ? " active" : ""}" type="button" data-like-btn data-liked="${Number(item.like_action) === 1 ? "1" : "0"}" data-count="${item.like || 0}">${icon("thumbs-up", 13)}<span class="like-count">${formatCount(item.like)}</span></button>
-        <span class="comment-action">${icon("message-square", 13)}${formatCount(replyCount)}</span>
+        <button class="comment-reply-btn" type="button" data-reply-to="${rpid}" data-reply-name="${escapeAttr(
+    item.name || ""
+  )}">回复</button>
+        <button class="comment-like${liked ? " active" : ""}" type="button" data-like-btn data-liked="${
+    liked ? "1" : "0"
+  }" data-count="${item.like || 0}">${icon("thumbs-up", 18)}<span class="like-count">${formatCount(
+    item.like
+  )}</span></button>
       </div>
       ${
         replies.length
@@ -123,6 +136,24 @@ function commentHtml(item) {
       }
     </div>
   </article>`;
+}
+
+/** 评论输入框：发表新评论 / 回复某条评论共用。 */
+function commentComposerHtml() {
+  return `<div class="comment-composer" data-composer>
+    <span class="avatar avatar-sm" data-composer-avatar></span>
+    <div class="comment-composer-body">
+      <div class="comment-reply-hint" data-reply-hint hidden>
+        <span>正在回复 <b data-reply-target></b></span>
+        <button class="comment-reply-cancel" type="button" data-reply-cancel>取消</button>
+      </div>
+      <textarea class="comment-input" data-comment-input rows="2" placeholder="发一条友善的评论" maxlength="1000"></textarea>
+      <div class="comment-composer-foot">
+        <span class="comment-composer-count" data-comment-counter>0/1000</span>
+        <button class="btn btn-sm btn-primary" type="button" data-comment-submit>发表评论</button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function pagesCardHtml(pages, activeIndex) {
@@ -322,7 +353,7 @@ export async function render(root, ctx) {
 
       <section class="comments-card">
         <div class="comments-head">
-          <div class="comments-title">${icon("message-square", 18)}评论
+          <div class="comments-title">评论
             <span class="count" data-comment-count>${formatCount(stat.reply)}</span>
           </div>
           <div class="segmented" data-comment-sort>
@@ -330,6 +361,7 @@ export async function render(root, ctx) {
             <button type="button" data-sort="time">最新</button>
           </div>
         </div>
+        <div class="comment-composer-slot" data-composer-slot>${commentComposerHtml()}</div>
         <div class="comment-list" data-comment-list>${skeletonRows(3)}</div>
       </section>
     </div>
@@ -735,6 +767,113 @@ export async function render(root, ctx) {
   let commentSort = "hot";
   let commentPage = 0;
   let commentToken = 0;
+  // 回复目标：0 表示发表新评论
+  let replyRoot = 0;
+
+  // 输入框：补头像、字数统计、回复态切换
+  const composer = root.querySelector("[data-composer]");
+  const composerAvatar = root.querySelector("[data-composer-avatar]");
+  if (composerAvatar) {
+    const me = store.user;
+    if (me?.face) {
+      const img = document.createElement("img");
+      img.src = me.face;
+      img.alt = me.name || "我";
+      img.referrerPolicy = "no-referrer";
+      composerAvatar.replaceWith(img);
+      img.dataset.composerAvatar = "";
+    } else {
+      composerAvatar.classList.add("avatar-fallback");
+      composerAvatar.textContent = (store.user?.name || "我").slice(0, 1).toUpperCase();
+    }
+  }
+  const commentInput = root.querySelector("[data-comment-input]");
+  const commentSubmit = root.querySelector("[data-comment-submit]");
+  const commentCounter = root.querySelector("[data-comment-counter]");
+  const replyHint = root.querySelector("[data-reply-hint]");
+  const replyTargetEl = root.querySelector("[data-reply-target]");
+
+  const setReplyTarget = (rpid, name) => {
+    replyRoot = Number(rpid) || 0;
+    if (replyHint) replyHint.hidden = replyRoot <= 0;
+    if (replyTargetEl) replyTargetEl.textContent = replyRoot > 0 ? `@${name || "该用户"}` : "";
+    if (commentInput) {
+      commentInput.placeholder = replyRoot > 0 ? `回复 @${name || "该用户"}` : "发一条友善的评论";
+      commentInput.focus();
+    }
+    if (commentSubmit) commentSubmit.textContent = replyRoot > 0 ? "发表回复" : "发表评论";
+  };
+
+  commentInput?.addEventListener("input", () => {
+    const len = commentInput.value.length;
+    if (commentCounter) {
+      commentCounter.textContent = `${len}/1000`;
+      commentCounter.classList.toggle("over", len > 1000);
+    }
+  });
+
+  root.querySelector("[data-reply-cancel]")?.addEventListener("click", () => setReplyTarget(0, ""));
+
+  const submitComment = async () => {
+    if (!ensureLogin("发表评论需要先登录")) return;
+    const text = String(commentInput?.value || "").trim();
+    if (!text) {
+      toast("评论内容不能为空", "error");
+      return;
+    }
+    if (text.length > 1000) {
+      toast("评论最多 1000 字", "error");
+      return;
+    }
+    const target = replyRoot;
+    if (commentSubmit) {
+      commentSubmit.classList.add("busy");
+      commentSubmit.textContent = "发送中…";
+    }
+    try {
+      const created = await commentAdd(info.aid, text, target);
+      if (commentInput) commentInput.value = "";
+      if (commentCounter) commentCounter.textContent = "0/1000";
+      setReplyTarget(0, "");
+      if (target > 0) {
+        // 子回复：插进对应楼中楼
+        const host = commentList.querySelector(`.comment[data-rpid="${target}"]`);
+        if (host) {
+          const wrap = host.querySelector(".comment-replies");
+          const html = replyHtml(created);
+          if (wrap) wrap.insertAdjacentHTML("beforeend", html);
+          else
+            host
+              .querySelector(".comment-main")
+              .insertAdjacentHTML("beforeend", `<div class="comment-replies">${html}</div>`);
+        }
+        toast("回复成功", "success");
+      } else {
+        // 新评论：插到列表最前面（最新）或按热度就放到最前也可接受
+        commentList.insertAdjacentHTML("afterbegin", commentHtml(created));
+        toast("评论成功", "success");
+      }
+      const count = Number(commentCountEl?.textContent?.replace(/[^\d]/g, "")) || 0;
+      if (commentCountEl) commentCountEl.textContent = formatCount(count + 1);
+    } catch (error) {
+      if (isLoginError(error)) ensureLogin("登录状态已失效，请重新登录");
+      toast(errorText(error), "error");
+    } finally {
+      if (commentSubmit) {
+        commentSubmit.classList.remove("busy");
+        commentSubmit.textContent = replyRoot > 0 ? "发表回复" : "发表评论";
+      }
+    }
+  };
+
+  commentSubmit?.addEventListener("click", submitComment);
+  commentInput?.addEventListener("keydown", (event) => {
+    // Ctrl/Cmd + Enter 快捷发送
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      submitComment();
+    }
+  });
 
   const paintCommentError = (message) => {
     commentList.innerHTML = `<div class="comment-empty">${escapeHtml(
@@ -786,6 +925,18 @@ export async function render(root, ctx) {
       return;
     }
 
+    // 回复某条评论
+    const replyBtn = event.target.closest("[data-reply-to]");
+    if (replyBtn) {
+      event.preventDefault();
+      const rpid = Number(replyBtn.dataset.replyTo) || 0;
+      // 回复子回复时，root 要落到楼层主评论上
+      const host = replyBtn.closest(".comment");
+      const rootRpid = Number(host?.dataset.rpid) || rpid;
+      setReplyTarget(rootRpid, replyBtn.dataset.replyName || "");
+      return;
+    }
+
     // 点赞 / 取消点赞
     const likeBtn = event.target.closest("[data-like-btn]");
     if (likeBtn) {
@@ -830,11 +981,12 @@ export async function render(root, ctx) {
           (r) => !wrap || !wrap.querySelector(`[data-sub-rpid="${Number(r.rpid) || 0}"]`)
         );
         if (fresh.length) {
-          const html = fresh
-            .map((r) => replyHtml(r).replace('class="comment-reply"', `class="comment-reply" data-sub-rpid="${Number(r.rpid) || 0}"`))
-            .join("");
+          const html = fresh.map(replyHtml).join("");
           if (wrap) wrap.insertAdjacentHTML("beforeend", html);
-          else comment.querySelector(".comment-main").insertAdjacentHTML("beforeend", `<div class="comment-replies">${fresh.map(replyHtml).join("")}</div>`);
+          else
+            comment
+              .querySelector(".comment-main")
+              .insertAdjacentHTML("beforeend", `<div class="comment-replies">${html}</div>`);
         }
         if (data.has_more) {
           moreBtn.dataset.page = String(page + 1);
