@@ -1,6 +1,8 @@
 import {
   bilibiliVideoUrl,
   coinVideo,
+  commentLike,
+  commentReplies,
   comments as fetchComments,
   createFavoriteFolder,
   danmaku as fetchDanmaku,
@@ -77,7 +79,10 @@ function replyHtml(reply) {
 function commentHtml(item) {
   const replies = Array.isArray(item.replies) ? item.replies : [];
   const pictures = Array.isArray(item.pictures) ? item.pictures : [];
-  return `<article class="comment">
+  const rpid = Number(item.rpid) || 0;
+  const replyCount = Number(item.reply_count) || 0;
+  const hasMoreReplies = replyCount > replies.length;
+  return `<article class="comment" data-rpid="${rpid}" data-oid="${Number(item.oid) || 0}">
     ${avatarTag(item.avatar, item.name, "avatar avatar-sm")}
     <div class="comment-main">
       <div class="comment-head">
@@ -101,8 +106,8 @@ function commentHtml(item) {
           : ""
       }
       <div class="comment-actions">
-        <span>${icon("thumbs-up", 13)}${formatCount(item.like)}</span>
-        <span>${icon("message-square", 13)}${formatCount(item.reply_count)}</span>
+        <button class="comment-action like-btn${Number(item.like_action) === 1 ? " active" : ""}" type="button" data-like-btn data-liked="${Number(item.like_action) === 1 ? "1" : "0"}" data-count="${item.like || 0}">${icon("thumbs-up", 13)}<span class="like-count">${formatCount(item.like)}</span></button>
+        <span class="comment-action">${icon("message-square", 13)}${formatCount(replyCount)}</span>
       </div>
       ${
         replies.length
@@ -110,10 +115,10 @@ function commentHtml(item) {
           : ""
       }
       ${
-        Number(item.reply_count) > replies.length && replies.length
-          ? `<div class="comment-more"><span class="hint">共 ${formatCount(
-              item.reply_count
-            )} 条回复</span></div>`
+        hasMoreReplies
+          ? `<div class="comment-more"><button class="btn btn-sm btn-soft" type="button" data-more-replies data-page="1">查看全部 ${formatCount(
+              replyCount
+            )} 条回复</button></div>`
           : ""
       }
     </div>
@@ -774,9 +779,77 @@ export async function render(root, ctx) {
     }
   };
 
-  commentList.addEventListener("click", (event) => {
+  commentList.addEventListener("click", async (event) => {
     const pic = event.target.closest("[data-comment-pic]");
-    if (pic) openImageViewer(pic.dataset.commentPic, "评论图片");
+    if (pic) {
+      openImageViewer(pic.dataset.commentPic, "评论图片");
+      return;
+    }
+
+    // 点赞 / 取消点赞
+    const likeBtn = event.target.closest("[data-like-btn]");
+    if (likeBtn) {
+      if (!ensureLogin("点赞评论需要先登录")) return;
+      const comment = likeBtn.closest(".comment");
+      const rpid = Number(comment?.dataset.rpid) || 0;
+      const aid = Number(comment?.dataset.oid) || info.aid;
+      if (!rpid) return;
+      const next = likeBtn.dataset.liked !== "1";
+      const countEl = likeBtn.querySelector(".like-count");
+      const base = Number(likeBtn.dataset.count) || 0;
+      likeBtn.disabled = true;
+      try {
+        await commentLike(aid, rpid, next);
+        likeBtn.dataset.liked = next ? "1" : "0";
+        likeBtn.dataset.count = base + (next ? 1 : -1);
+        likeBtn.classList.toggle("active", next);
+        if (countEl) countEl.textContent = formatCount(Math.max(0, base + (next ? 1 : -1)));
+      } catch (error) {
+        if (isLoginError(error)) ensureLogin("登录状态已失效，请重新登录");
+        toast(errorText(error), "error");
+      } finally {
+        likeBtn.disabled = false;
+      }
+      return;
+    }
+
+    // 查看更多子回复
+    const moreBtn = event.target.closest("[data-more-replies]");
+    if (moreBtn) {
+      const comment = moreBtn.closest(".comment");
+      const rpid = Number(comment?.dataset.rpid) || 0;
+      const aid = Number(comment?.dataset.oid) || info.aid;
+      if (!rpid || moreBtn.disabled) return;
+      const page = Number(moreBtn.dataset.page) || 1;
+      moreBtn.disabled = true;
+      moreBtn.textContent = "加载中…";
+      try {
+        const data = await commentReplies(aid, rpid, page);
+        const wrap = comment.querySelector(".comment-replies");
+        const fresh = (data.items || []).filter(
+          (r) => !wrap || !wrap.querySelector(`[data-sub-rpid="${Number(r.rpid) || 0}"]`)
+        );
+        if (fresh.length) {
+          const html = fresh
+            .map((r) => replyHtml(r).replace('class="comment-reply"', `class="comment-reply" data-sub-rpid="${Number(r.rpid) || 0}"`))
+            .join("");
+          if (wrap) wrap.insertAdjacentHTML("beforeend", html);
+          else comment.querySelector(".comment-main").insertAdjacentHTML("beforeend", `<div class="comment-replies">${fresh.map(replyHtml).join("")}</div>`);
+        }
+        if (data.has_more) {
+          moreBtn.dataset.page = String(page + 1);
+          moreBtn.disabled = false;
+          moreBtn.textContent = `还有 ${formatCount(Math.max(0, (data.total || 0) - page * 20))} 条回复，点击查看`;
+        } else {
+          moreBtn.closest(".comment-more")?.remove();
+        }
+      } catch (error) {
+        moreBtn.disabled = false;
+        moreBtn.textContent = "加载失败，点击重试";
+        if (isLoginError(error)) ensureLogin("登录状态已失效，请重新登录");
+        else toast(errorText(error), "error");
+      }
+    }
   });
 
   commentSortEl?.addEventListener("click", (event) => {

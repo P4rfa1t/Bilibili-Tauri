@@ -347,11 +347,63 @@ pub async fn history(
     state: State<'_, AppState>,
     max: Option<i64>,
     view_at: Option<i64>,
+    kind: Option<String>,
 ) -> Result<HistoryPage, String> {
     let login = login_of(&state);
     state
         .client
-        .history(max.unwrap_or(0), view_at.unwrap_or(0), &login)
+        .history(
+            max.unwrap_or(0),
+            view_at.unwrap_or(0),
+            kind.as_deref().unwrap_or("all"),
+            &login,
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn history_clear(state: State<'_, AppState>) -> Result<(), String> {
+    let login = login_of(&state);
+    state.client.history_clear(&login).await
+}
+
+#[tauri::command]
+pub async fn recommend_feed(
+    state: State<'_, AppState>,
+    fresh_idx: Option<u32>,
+) -> Result<PageResult<VideoCard>, String> {
+    let login = login_of(&state);
+    state
+        .client
+        .recommend(fresh_idx.unwrap_or(1), &login)
+        .await
+}
+
+#[tauri::command]
+pub async fn comment_like(
+    state: State<'_, AppState>,
+    aid: i64,
+    rpid: i64,
+    action: bool,
+) -> Result<i64, String> {
+    let login = login_of(&state);
+    state
+        .client
+        .comment_like(aid, rpid, action, &login)
+        .await
+}
+
+#[tauri::command]
+pub async fn comment_replies(
+    state: State<'_, AppState>,
+    aid: i64,
+    rpid: i64,
+    page: Option<u32>,
+) -> Result<CommentPage, String> {
+    let login = login_of(&state);
+    state
+        .client
+        .comment_replies(aid, rpid, page.unwrap_or(1), &login)
         .await
 }
 

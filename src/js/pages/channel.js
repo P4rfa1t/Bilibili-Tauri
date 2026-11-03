@@ -16,6 +16,7 @@ import * as bangumiPage from "./bangumi.js";
 import * as dynamicPage from "./dynamic.js";
 import * as homePage from "./home.js";
 import * as livePage from "./live.js";
+import * as recommendPage from "./recommend.js";
 
 /** 追番默认番剧，影视默认电影。 */
 const BANGUMI_DEFAULT_TYPE = 1;
@@ -24,6 +25,7 @@ const FILM_DEFAULT_TYPE = 2;
 function routeFor(channel, query) {
   if (channel === "dynamic") return { module: dynamicPage, query: new URLSearchParams() };
   if (channel === "live") return { module: livePage, query: channelQuery(query) };
+  if (channel === "recommend") return { module: recommendPage, query: new URLSearchParams() };
   if (channel === "bangumi") {
     const next = channelQuery(query);
     if (!next.get("type")) next.set("type", String(BANGUMI_DEFAULT_TYPE));

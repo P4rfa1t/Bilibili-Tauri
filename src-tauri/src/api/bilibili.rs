@@ -460,6 +460,71 @@ impl BilibiliClient {
         })
     }
 
+    /// 官方首页推荐流。
+    ///
+    /// 与热门不同，推荐接口会结合登录 Cookie 给出更贴近个人偏好的内容；
+    /// 匿名状态下也能返回官方推荐。`fresh_idx` 递增即可获得下一批内容。
+    pub async fn recommend(
+        &self,
+        fresh_idx: u32,
+        login: &Cookies,
+    ) -> Result<PageResult<VideoCard>, String> {
+        self.ensure_buvid(login).await;
+        let idx = fresh_idx.max(1);
+        let params = [
+            ("ps", "24".to_string()),
+            ("fresh_type", "3".to_string()),
+            ("feed_version", "V8".to_string()),
+            ("fresh_idx", idx.to_string()),
+            ("fresh_idx_1h", idx.to_string()),
+            ("brush", idx.saturating_sub(1).to_string()),
+            ("homepage_ver", "1".to_string()),
+            ("screen", "1920-1080".to_string()),
+            ("web_location", "1430654".to_string()),
+        ];
+        match self
+            .api_get("/x/web-interface/index/top/feed/rcmd", &params, login)
+            .await
+        {
+            Ok(d) => {
+                let mut items = Vec::new();
+                if let Some(arr) = d["item"].as_array() {
+                    for item in arr {
+                        if item["goto"].as_str() != Some("av") {
+                            continue;
+                        }
+                        let Some(mut card) = parse_video_card(item) else {
+                            continue;
+                        };
+                        if card.aid <= 0 {
+                            card.aid = num_of(&item["id"]);
+                        }
+                        if card.recommend_reason.is_empty() {
+                            card.recommend_reason =
+                                plain_text(&text_of(&item["rcmd_reason"]["content"]));
+                        }
+                        items.push(card);
+                    }
+                }
+                if items.is_empty() {
+                    return Err("暂时没有获取到推荐内容，请稍后重试".into());
+                }
+                Ok(PageResult {
+                    items,
+                    page: idx,
+                    has_more: idx < 60,
+                    total: 0,
+                })
+            }
+            Err(error) => {
+                // 推荐接口偶发风控时退回热门，保证页面仍可浏览
+                let mut fallback = self.popular(1, login).await.map_err(|_| error)?;
+                fallback.page = idx;
+                Ok(fallback)
+            }
+        }
+    }
+
     /// 排行榜
     pub async fn ranking(&self, rid: i64, login: &Cookies) -> Result<PageResult<VideoCard>, String> {
         let d = self
@@ -946,6 +1011,72 @@ impl BilibiliClient {
         })
     }
 
+    /// 评论点赞 / 取消点赞（action: true=赞 false=取消）。
+    pub async fn comment_like(
+        &self,
+        aid: i64,
+        rpid: i64,
+        action: bool,
+        login: &Cookies,
+    ) -> Result<i64, String> {
+        let csrf = Self::require_login(login)?;
+        let d = self
+            .post_form_at(
+                "/x/v2/reply/action",
+                vec![
+                    ("type".to_string(), "1".to_string()),
+                    ("oid".to_string(), aid.to_string()),
+                    ("rpid".to_string(), rpid.to_string()),
+                    (
+                        "action".to_string(),
+                        if action { "1" } else { "0" }.to_string(),
+                    ),
+                    ("csrf".to_string(), csrf),
+                ],
+                login,
+                &format!("https://www.bilibili.com/video/av{aid}"),
+            )
+            .await?;
+        Ok(num_of(&d["action"]))
+    }
+
+    /// 评论的子回复列表（查看更多回复）。
+    pub async fn comment_replies(
+        &self,
+        aid: i64,
+        rpid: i64,
+        page: u32,
+        login: &Cookies,
+    ) -> Result<CommentPage, String> {
+        self.ensure_buvid(login).await;
+        let d = self
+            .api_get(
+                "/x/v2/reply/reply",
+                &[
+                    ("type", "1".into()),
+                    ("oid", aid.to_string()),
+                    ("root", rpid.to_string()),
+                    ("pn", page.to_string()),
+                    ("ps", "20".into()),
+                    ("nohot", "0".into()),
+                ],
+                login,
+            )
+            .await?;
+        let items = d["replies"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| parse_comment(v, 0)).collect())
+            .unwrap_or_default();
+        let total = num_of(&d["page"]["count"]);
+        let pages = (total + 19) / 20;
+        Ok(CommentPage {
+            items,
+            page,
+            has_more: pages > 0 && (page as i64) < pages,
+            total,
+        })
+    }
+
     // ---------- 登录 ----------
 
     pub async fn login_state(&self, login: &Cookies) -> Result<UserInfo, String> {
@@ -1404,25 +1535,32 @@ impl BilibiliClient {
         &self,
         max: i64,
         view_at: i64,
+        kind: &str,
         login: &Cookies,
     ) -> Result<HistoryPage, String> {
         Self::require_login(login)?;
-        let d = self
-            .api_get(
-                "/x/web-interface/history/cursor",
-                &[
-                    ("max", max.to_string()),
-                    ("view_at", view_at.to_string()),
-                    ("ps", "30".into()),
-                ],
-                login,
-            )
-            .await?;
+        let mut params: Vec<(&str, String)> = vec![
+            ("max", max.to_string()),
+            ("view_at", view_at.to_string()),
+            ("ps", "30".to_string()),
+        ];
+        // 综合 / archive=视频 / live=直播 / article=专栏
+        match kind {
+            "archive" | "live" | "article" => params.push(("type", kind.to_string())),
+            _ => {}
+        }
+        let d = self.api_get("/x/web-interface/history/cursor", &params, login).await?;
         let mut items = Vec::new();
         if let Some(arr) = d["list"].as_array() {
             for v in arr {
                 let bvid = text_of(&v["history"]["bvid"]);
-                if bvid.is_empty() {
+                let business = text_of(&v["history"]["business"]);
+                let uri = text_of(&v["uri"]);
+                // 直播/专栏没有 bvid：直播直接带 roomid，专栏前端拼 /read/cv<oid>
+                if bvid.is_empty() && business != "live" && business != "article" {
+                    continue;
+                }
+                if bvid.is_empty() && uri.is_empty() && business == "archive" {
                     continue;
                 }
                 let cover = {
@@ -1440,6 +1578,8 @@ impl BilibiliClient {
                 items.push(HistoryItem {
                     aid: num_of(&v["history"]["oid"]),
                     bvid,
+                    business: if business.is_empty() { "archive".into() } else { business },
+                    kid: num_of(&v["kid"]),
                     title: text_of(&v["title"]),
                     cover,
                     author: text_of(&v["author_name"]),
@@ -1450,17 +1590,32 @@ impl BilibiliClient {
                     view_at: num_of(&v["view_at"]),
                     videos: num_of(&v["videos"]) as i32,
                     page: num_of(&v["history"]["page"]) as i32,
+                    badge: text_of(&v["badge"]),
+                    live_status: num_of(&v["live_status"]) as i32,
                 });
             }
         }
         let cursor = &d["cursor"];
-        let has_more = !items.is_empty() && !cursor.is_null();
+        let has_more = !cursor.is_null() && cursor["max"].as_i64().is_some();
         Ok(HistoryPage {
             items,
             max: num_of(&cursor["max"]),
             view_at: num_of(&cursor["view_at"]),
             has_more,
         })
+    }
+
+    /// 清空全部历史记录（需要登录，危险操作）。
+    pub async fn history_clear(&self, login: &Cookies) -> Result<(), String> {
+        let csrf = Self::require_login(login)?;
+        self.post_form_at(
+            "/x/v2/history/clear",
+            vec![("csrf".to_string(), csrf)],
+            login,
+            "https://www.bilibili.com/account/history",
+        )
+        .await?;
+        Ok(())
     }
 
     // ---------- 用户空间 ----------
@@ -3045,6 +3200,9 @@ fn parse_comment(v: &Value, depth: i32) -> Option<CommentItem> {
         level: num_of(&v["member"]["level_info"]["current_level"]) as i32,
         message: text_of(&v["content"]["message"]),
         like: num_of(&v["like"]),
+        // 1 = 当前用户已点赞（登录后接口返回）
+        like_action: num_of(&v["action"]) as i32,
+        oid: num_of(&v["oid"]),
         ctime: num_of(&v["ctime"]),
         reply_count: num_of(&v["rcount"]),
         pictures,

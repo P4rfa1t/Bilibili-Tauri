@@ -180,6 +180,10 @@ pub struct CommentItem {
     pub level: i32,
     pub message: String,
     pub like: i64,
+    /// 1 = 当前用户已点赞
+    pub like_action: i32,
+    /// 评论所在对象 id（视频 aid）
+    pub oid: i64,
     pub ctime: i64,
     pub reply_count: i64,
     pub pictures: Vec<String>,
@@ -198,6 +202,10 @@ pub struct CommentPage {
 pub struct HistoryItem {
     pub aid: i64,
     pub bvid: String,
+    /// archive / live / article
+    pub business: String,
+    /// kid，删除/隐藏记录用
+    pub kid: i64,
     pub title: String,
     pub cover: String,
     pub author: String,
@@ -208,6 +216,10 @@ pub struct HistoryItem {
     pub view_at: i64,
     pub videos: i32,
     pub page: i32,
+    /// 直播分区名 / 专栏等标记
+    pub badge: String,
+    /// 直播状态：0 未开播 1 直播中 2 轮播中
+    pub live_status: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

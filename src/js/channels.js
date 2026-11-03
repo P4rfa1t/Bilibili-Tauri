@@ -10,6 +10,7 @@ import { escapeHtml } from "./utils.js";
 export const CHANNELS = [
   { key: "dynamic", label: "动态" },
   { key: "live", label: "直播" },
+  { key: "recommend", label: "推荐" },
   { key: "hot", label: "热门" },
   { key: "bangumi", label: "追番" },
   { key: "film", label: "影视" },
@@ -21,6 +22,7 @@ export const DEFAULT_CHANNEL = "hot";
 const KEEP_PARAMS = {
   dynamic: [],
   live: ["tab", "group", "area"],
+  recommend: [],
   hot: ["tab", "rid"],
   bangumi: ["type"],
   film: ["type"],

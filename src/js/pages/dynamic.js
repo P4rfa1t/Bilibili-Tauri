@@ -209,6 +209,10 @@ export async function render(root, ctx) {
       <div class="dyn-main">
         <div class="dyn-toolbar">
           <span class="rec-hint">按关注时间排序，下拉自动加载更多</span>
+          <button type="button" class="btn btn-soft btn-sm" data-dyn-refresh>${icon(
+            "refresh-cw",
+            14
+          )}刷新</button>
         </div>
         <div class="dyn-list" data-dyn-list>${skeletonRows(5)}</div>
       </div>
@@ -219,6 +223,10 @@ export async function render(root, ctx) {
         </div>
       </aside>
     </div>`;
+
+  root
+    .querySelector("[data-dyn-refresh]")
+    ?.addEventListener("click", () => ctx.refresh());
 
   const list = root.querySelector("[data-dyn-list]");
   const upList = root.querySelector("[data-dyn-uplist]");

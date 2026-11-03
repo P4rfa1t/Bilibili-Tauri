@@ -142,8 +142,24 @@ export function reportProgress(aid, cid, progress) {
 
 // ---------------- History & space ----------------
 
-export function history(max = 0, viewAt = 0) {
-  return call("history", { max, viewAt });
+export function recommendFeed(freshIdx = 1) {
+  return call("recommend_feed", { freshIdx });
+}
+
+export function history(max = 0, viewAt = 0, kind = "all") {
+  return call("history", { max, viewAt, kind });
+}
+
+export function historyClear() {
+  return call("history_clear", {});
+}
+
+export function commentLike(aid, rpid, action = true) {
+  return call("comment_like", { aid, rpid, action });
+}
+
+export function commentReplies(aid, rpid, page = 1) {
+  return call("comment_replies", { aid, rpid, page });
 }
 
 export function spaceInfo(mid) {

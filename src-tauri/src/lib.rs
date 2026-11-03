@@ -34,6 +34,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::home_feed,
+            commands::recommend_feed,
             commands::search,
             commands::search_suggest,
             commands::search_trending,
@@ -60,6 +61,9 @@ pub fn run() {
             commands::watch_later_add,
             commands::report_progress,
             commands::history,
+            commands::history_clear,
+            commands::comment_like,
+            commands::comment_replies,
             commands::space_info,
             commands::space_videos,
             commands::bangumi_list,

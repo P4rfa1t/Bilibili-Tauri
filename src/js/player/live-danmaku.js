@@ -81,6 +81,7 @@ export class LiveDanmaku {
     this.destroyed = false;
     this.status = "idle";
     this.count = 0;
+    this.received = 0;
 
     this.start();
   }
@@ -198,6 +199,12 @@ export class LiveDanmaku {
     }
   }
 
+  notifyCount() {
+    if (this.onStatus && this.status === "live") {
+      this.onStatus("live", `弹幕已连接 · 已收到 ${this.count} 条`);
+    }
+  }
+
   handleJson(text) {
     let message = null;
     try {
@@ -214,6 +221,7 @@ export class LiveDanmaku {
         color: hexColor(meta[3]),
         size: Number(meta[2]) || 25,
       });
+      this.notifyCount();
       return;
     }
     if (cmd === "SUPER_CHAT_MESSAGE" && message.data) {
@@ -280,15 +288,25 @@ export class LiveDanmaku {
     });
 
     socket.addEventListener("message", (event) => {
-      if (this.destroyed || !(event.data instanceof ArrayBuffer)) return;
+      if (this.destroyed) return;
       const data = event.data;
+      // WebView2 里 event.data 可能来自别的 realm，instanceof 判定会误判
+      const isBuffer =
+        data instanceof ArrayBuffer ||
+        (typeof ArrayBuffer !== "undefined" &&
+          ArrayBuffer.isView?.(data) === false &&
+          typeof data === "object" &&
+          data !== null &&
+          typeof data.byteLength === "number");
+      if (!isBuffer) return;
+      this.received += 1;
       // 按到达顺序串行解压，避免包序错乱
       this.chain = this.chain.then(() => this.handleFrame(data)).catch(() => {});
     });
 
     socket.addEventListener("error", () => {
       if (this.destroyed) return;
-      this.setStatus("error", "弹幕连接中断");
+      this.setStatus("error", `弹幕连接中断（收到 ${this.received} 包 / ${this.count} 条）`);
     });
 
     socket.addEventListener("close", () => {
