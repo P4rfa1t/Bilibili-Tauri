@@ -20,7 +20,6 @@ const TITLES = {
   home: "首页",
   dynamic: "动态",
   messages: "消息",
-  recommend: "推荐",
   search: "搜索",
   video: "视频",
   bangumi: "番剧",
@@ -65,9 +64,6 @@ function resolve(route) {
   }
   if (first === "messages") {
     return { name: "messages", module: messages, params: {}, nav: "messages" };
-  }
-  if (first === "recommend") {
-    return { name: "recommend", module: home, params: { channel: "recommend" }, nav: "recommend" };
   }
   if (first === "search") {
     return { name: "search", module: search, params: {}, nav: "search" };

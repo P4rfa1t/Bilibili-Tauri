@@ -1,5 +1,10 @@
 Add-Type -AssemblyName System.Drawing
 
+# Matches the inline SVG of .brand-mark in src/index.html:
+# gradient rounded background + solid white TV with antenna,
+# and the play triangle cut out so the gradient shows through.
+# No dark screen anymore.
+
 $size = 1024
 $bmp = New-Object System.Drawing.Bitmap($size, $size)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -26,7 +31,7 @@ $brush = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
 )
 $g.FillPath($brush, $bgPath)
 
-# 柔光
+# soft highlight
 $glow = New-Object System.Drawing.Drawing2D.GraphicsPath
 $glow.AddEllipse(-180, -260, 900, 900)
 $glowBrush = New-Object System.Drawing.Drawing2D.PathGradientBrush($glow)
@@ -34,34 +39,27 @@ $glowBrush.CenterColor = [System.Drawing.Color]::FromArgb(70, 255, 255, 255)
 $glowBrush.SurroundColors = @([System.Drawing.Color]::FromArgb(0, 255, 255, 255))
 $g.FillPath($glowBrush, $glow)
 
-# 天线
-$pen = New-Object System.Drawing.Pen([System.Drawing.Color]::White, 30)
+# antenna
+$pen = New-Object System.Drawing.Pen([System.Drawing.Color]::White, 34)
 $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
 $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-$g.DrawLine($pen, 400, 300, 306, 176)
-$g.DrawLine($pen, 624, 300, 718, 176)
+$g.DrawLine($pen, 404, 300, 300, 168)
+$g.DrawLine($pen, 620, 300, 724, 168)
 
-# 电视外壳
-$body = New-RoundedRect 164 284 696 528 86
+# TV body in pure white
 $white = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::White)
+$body = New-RoundedRect 148 280 728 552 92
 $g.FillPath($white, $body)
 
-# 屏幕
-$screen = New-RoundedRect 230 350 564 396 42
-$dark = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 17, 20, 27))
-$g.FillPath($dark, $screen)
-
-# 播放三角
-$play = New-Object System.Drawing.Drawing2D.GraphicsPath
-$play.AddPolygon(@(
-    (New-Object System.Drawing.PointF(468, 432)),
-    (New-Object System.Drawing.PointF(468, 664)),
-    (New-Object System.Drawing.PointF(660, 548))
-))
-$g.FillPath($white, $play)
-
-# 底部小灯
-$g.FillEllipse($white, 742, 766, 22, 22)
+# play triangle: filled with the same gradient as the background
+$tri = New-Object System.Drawing.Drawing2D.GraphicsPath
+$pts = [System.Drawing.PointF[]]@(
+    (New-Object System.Drawing.PointF(444, 424)),
+    (New-Object System.Drawing.PointF(444, 690)),
+    (New-Object System.Drawing.PointF(672, 557))
+)
+$tri.AddPolygon($pts)
+$g.FillPath($brush, $tri)
 
 $out = Join-Path $PSScriptRoot 'logo.png'
 $bmp.Save($out, [System.Drawing.Imaging.ImageFormat]::Png)

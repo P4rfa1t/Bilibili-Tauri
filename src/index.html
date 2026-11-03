@@ -32,7 +32,7 @@
   </head>
   <body>
     <div class="app" id="app">
-      <header class="titlebar" id="titlebar" data-tauri-drag-region>
+      <header class="titlebar" id="titlebar">
         <div class="tb-left">
           <button class="icon-btn tb-menu" id="sidebar-toggle" title="收起侧边栏" aria-label="切换侧边栏">
             <span data-icon="panel-left"></span>
@@ -76,6 +76,10 @@
         </div>
 
         <div class="tb-right">
+          <a class="icon-btn msg-btn" id="dyn-btn" href="#/home?channel=dynamic" title="动态" aria-label="动态">
+            <span data-icon="activity"></span>
+            <span class="msg-dot hidden" id="dyn-dot"></span>
+          </a>
           <a class="icon-btn msg-btn" id="msg-btn" href="#/messages" title="消息" aria-label="消息">
             <span data-icon="bell"></span>
             <span class="msg-dot hidden" id="msg-dot"></span>
@@ -113,14 +117,8 @@
             <a class="nav-item" href="#/home?channel=hot" data-nav="hot">
               <span class="nav-icon" data-icon="home"></span><span class="nav-label">首页</span>
             </a>
-            <a class="nav-item" href="#/home?channel=dynamic" data-nav="dynamic">
-              <span class="nav-icon" data-icon="at-sign"></span><span class="nav-label">动态</span>
-            </a>
             <a class="nav-item" href="#/home?channel=live" data-nav="live">
               <span class="nav-icon" data-icon="radio"></span><span class="nav-label">直播</span>
-            </a>
-            <a class="nav-item" href="#/home?channel=recommend" data-nav="recommend">
-              <span class="nav-icon" data-icon="compass"></span><span class="nav-label">推荐</span>
             </a>
             <a class="nav-item" href="#/home?channel=bangumi" data-nav="bangumi">
               <span class="nav-icon" data-icon="tv"></span><span class="nav-label">追番</span>
@@ -130,9 +128,6 @@
             </a>
 
             <div class="nav-section">我的</div>
-            <a class="nav-item" href="#/messages" data-nav="messages">
-              <span class="nav-icon" data-icon="bell"></span><span class="nav-label">消息</span>
-            </a>
             <a class="nav-item" href="#/history" data-nav="history">
               <span class="nav-icon" data-icon="history"></span><span class="nav-label">历史记录</span>
             </a>

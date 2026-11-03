@@ -1265,6 +1265,18 @@ button.tag:hover {
   height: 88px;
 }
 
+/* 头像取不到图时的首字母兜底：尺寸交给 avatar-xs/sm/md 等类，这里只保证居中 */
+.avatar-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+  font-weight: 600;
+  font-size: 0.78em;
+  line-height: 1;
+  user-select: none;
+}
+
 /* Progress --------------------------------------------------------------- */
 .mini-progress {
   height: 3px;

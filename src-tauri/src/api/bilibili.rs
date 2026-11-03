@@ -460,71 +460,6 @@ impl BilibiliClient {
         })
     }
 
-    /// 官方首页推荐流。
-    ///
-    /// 与热门不同，推荐接口会结合登录 Cookie 给出更贴近个人偏好的内容；
-    /// 匿名状态下也能返回官方推荐。`fresh_idx` 递增即可获得下一批内容。
-    pub async fn recommend(
-        &self,
-        fresh_idx: u32,
-        login: &Cookies,
-    ) -> Result<PageResult<VideoCard>, String> {
-        self.ensure_buvid(login).await;
-        let idx = fresh_idx.max(1);
-        let params = [
-            ("ps", "24".to_string()),
-            ("fresh_type", "3".to_string()),
-            ("feed_version", "V8".to_string()),
-            ("fresh_idx", idx.to_string()),
-            ("fresh_idx_1h", idx.to_string()),
-            ("brush", idx.saturating_sub(1).to_string()),
-            ("homepage_ver", "1".to_string()),
-            ("screen", "1920-1080".to_string()),
-            ("web_location", "1430654".to_string()),
-        ];
-        match self
-            .api_get("/x/web-interface/index/top/feed/rcmd", &params, login)
-            .await
-        {
-            Ok(d) => {
-                let mut items = Vec::new();
-                if let Some(arr) = d["item"].as_array() {
-                    for item in arr {
-                        if item["goto"].as_str() != Some("av") {
-                            continue;
-                        }
-                        let Some(mut card) = parse_video_card(item) else {
-                            continue;
-                        };
-                        if card.aid <= 0 {
-                            card.aid = num_of(&item["id"]);
-                        }
-                        if card.recommend_reason.is_empty() {
-                            card.recommend_reason =
-                                plain_text(&text_of(&item["rcmd_reason"]["content"]));
-                        }
-                        items.push(card);
-                    }
-                }
-                if items.is_empty() {
-                    return Err("暂时没有获取到推荐内容，请稍后重试".into());
-                }
-                Ok(PageResult {
-                    items,
-                    page: idx,
-                    has_more: idx < 60,
-                    total: 0,
-                })
-            }
-            Err(error) => {
-                // 推荐接口偶发风控时退回热门，保证页面仍可浏览
-                let mut fallback = self.popular(1, login).await.map_err(|_| error)?;
-                fallback.page = idx;
-                Ok(fallback)
-            }
-        }
-    }
-
     /// 排行榜
     pub async fn ranking(&self, rid: i64, login: &Cookies) -> Result<PageResult<VideoCard>, String> {
         let d = self
@@ -2318,6 +2253,162 @@ impl BilibiliClient {
             up: num_of(&d["up"]),
             total: reply + at + like + sys_msg + chat,
         })
+    }
+
+    // ---------------- 动态页左右栏 ----------------
+
+    /// 有更新的 UP 主（动态页左栏，需要登录）。
+    pub async fn dynamic_uplist(&self, login: &Cookies) -> Result<Vec<DynUp>, String> {
+        self.ensure_buvid(login).await;
+        let url = "https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/w_dyn_uplist?last_dyn_id=&last_update_time=&size=20";
+        let d = self
+            .get_json_url_at(
+                url,
+                login,
+                "https://t.bilibili.com/",
+                "https://t.bilibili.com",
+            )
+            .await?;
+        let mut out = Vec::new();
+        if let Some(arr) = d["items"].as_array() {
+            for item in arr {
+                let info = &item["user_profile"]["info"];
+                let mid = num_of(&info["uid"]);
+                if mid <= 0 {
+                    continue;
+                }
+                out.push(DynUp {
+                    mid,
+                    name: text_of(&info["uname"]),
+                    face: fix_url(&text_of(&info["face"])),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// 关注的 UP 主正在直播（动态页右栏，需要登录）。
+    pub async fn live_following(&self, login: &Cookies) -> Result<Vec<FollowingLive>, String> {
+        self.ensure_buvid(login).await;
+        let url = format!(
+            "{LIVE_API}/xlive/web-ucenter/v1/xfetter/FeedList?page=1&page_size=20&platform=web"
+        );
+        let d = self
+            .get_json_url_at(
+                &url,
+                login,
+                "https://live.bilibili.com/",
+                "https://live.bilibili.com",
+            )
+            .await?;
+        let mut out = Vec::new();
+        if let Some(arr) = d["list"].as_array() {
+            for item in arr {
+                let room_id = num_of(&item["roomid"]);
+                if room_id <= 0 {
+                    continue;
+                }
+                let area = text_of(&item["area_name"]);
+                let parent = text_of(&item["parent_area_name"]);
+                out.push(FollowingLive {
+                    room_id,
+                    uid: num_of(&item["uid"]),
+                    name: text_of(&item["uname"]),
+                    face: fix_url(&text_of(&item["face"])),
+                    cover: fix_url(&text_of(&item["pic"])),
+                    title: plain_text(&text_of(&item["title"])),
+                    area: if area.is_empty() { parent } else { area },
+                    online: num_of(&item["online"]),
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    /// 直播弹幕服务器凭据。
+    pub async fn live_danmu_conf(&self, room_id: i64, login: &Cookies) -> Result<DanmuConf, String> {
+        self.ensure_buvid(login).await;
+        let url = format!(
+            "{LIVE_API}/room/v1/Danmu/getConf?room_id={room_id}&platform=pc&player=web"
+        );
+        let d = self
+            .get_json_url_at(
+                &url,
+                login,
+                &format!("https://live.bilibili.com/{room_id}"),
+                "https://live.bilibili.com",
+            )
+            .await?;
+        let mut servers = Vec::new();
+        if let Some(arr) = d["host_server_list"].as_array() {
+            for s in arr {
+                let host = text_of(&s["host"]);
+                if host.is_empty() {
+                    continue;
+                }
+                let mut wss_port = num_of(&s["wss_port"]);
+                if wss_port <= 0 {
+                    wss_port = 443;
+                }
+                servers.push(DanmuServer { host, wss_port });
+            }
+        }
+        let mut host = text_of(&d["host"]);
+        if host.is_empty() {
+            host = servers
+                .first()
+                .map(|s| s.host.clone())
+                .unwrap_or_else(|| "broadcastlv.chat.bilibili.com".to_string());
+        }
+        let mut wss_port = num_of(&d["wss_port"]);
+        if wss_port <= 0 {
+            wss_port = 443;
+        }
+        Ok(DanmuConf {
+            token: text_of(&d["token"]),
+            host,
+            wss_port,
+            servers,
+        })
+    }
+
+    /// 历史弹幕（作为连上 WS 之前的垫场内容）。
+    pub async fn live_danmu_history(
+        &self,
+        room_id: i64,
+        login: &Cookies,
+    ) -> Result<DanmuHistory, String> {
+        self.ensure_buvid(login).await;
+        let url = format!(
+            "{LIVE_API}/xlive/web-room/v1/dM/gethistory?roomid={room_id}&room_type=0"
+        );
+        let d = self
+            .get_json_url_at(
+                &url,
+                login,
+                &format!("https://live.bilibili.com/{room_id}"),
+                "https://live.bilibili.com",
+            )
+            .await?;
+        let mut items = Vec::new();
+        if let Some(arr) = d["room"].as_array() {
+            for m in arr {
+                let text = plain_text(&text_of(&m["text"]));
+                if text.is_empty() {
+                    continue;
+                }
+                let color = m["color"].as_u64().unwrap_or(0xffffff) as u32;
+                items.push(DanmuHistoryItem {
+                    text,
+                    uname: text_of(&m["nickname"]),
+                    uid: num_of(&m["uid"]),
+                    timeline: text_of(&m["timeline"]),
+                    color,
+                    mode: num_of(&m["mode"]) as i32,
+                });
+            }
+        }
+        Ok(DanmuHistory { items })
     }
 }
 

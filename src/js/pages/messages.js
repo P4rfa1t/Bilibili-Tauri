@@ -77,6 +77,12 @@ function usersHtml(users) {
     .join("")}</div>`;
 }
 
+/** 从 uri 里抠出 BV 号，能站内跳转就不用开浏览器。 */
+function bvidOf(uri) {
+  const match = String(uri || "").match(/\/(BV[0-9A-Za-z]{10})/);
+  return match ? match[1] : "";
+}
+
 function itemHref(item) {
   const uri = String(item.uri || "");
   if (uri.startsWith("bilibili://")) return "";
@@ -84,12 +90,38 @@ function itemHref(item) {
   return "";
 }
 
+/** 原视频/原动态条目：标题 + BV 号，完全不依赖接口返回封面。 */
+function sourceHtml(item) {
+  const title = String(item.title || "").trim();
+  if (!title) return "";
+  const bvid = bvidOf(item.uri);
+  const business = String(item.business || "").trim() || "视频";
+  const inner = `<span class="msg-source-icon">${icon("play-circle", 18)}</span>
+    <span class="msg-source-body">
+      <span class="msg-source-title">${escapeHtml(title)}</span>
+      <span class="msg-source-sub">${escapeHtml(business)}${
+    bvid ? ` · ${escapeHtml(bvid)}` : ""
+  }</span>
+    </span>
+    <span class="msg-source-go">${icon("chevron-right", 14)}</span>`;
+  if (bvid) {
+    return `<a class="msg-source" href="#/video/${encodeURIComponent(bvid)}">${inner}</a>`;
+  }
+  const external = itemHref(item);
+  if (external) {
+    return `<a class="msg-source" href="${escapeAttr(external)}" data-external>${inner}</a>`;
+  }
+  return `<div class="msg-source">${inner}</div>`;
+}
+
 function messageCard(item) {
-  const href = itemHref(item);
   const title = String(item.title || "").trim();
   const content = String(item.content || "").trim();
   const users = usersHtml(item.users);
   const count = Number(item.count) || 0;
+  const image = String(item.image || "").trim();
+  // 回复正文常常与视频标题重复，重复时正文不再单独占一行
+  const showContent = content && content !== title;
   const meta = `<div class="msg-meta">
       <span class="msg-kind">${icon(
         item.kind === "like" ? "heart" : item.kind === "at" ? "at-sign" : "message-square",
@@ -99,19 +131,12 @@ function messageCard(item) {
       ${item.time ? `<span>${escapeHtml(timeAgo(item.time))}</span>` : ""}
       ${count > 1 ? `<span>${formatCount(count)} 条</span>` : ""}
     </div>`;
-  const inner = `${users}
-    ${title ? `<div class="msg-title">${escapeHtml(title)}</div>` : ""}
-    ${content ? `<div class="msg-content">${escapeHtml(content)}</div>` : ""}
-    ${meta}
-    ${
-      item.image
-        ? `<div class="msg-image">${imgTag(item.image, { w: 240, h: 140, alt: "" })}</div>`
-        : ""
-    }`;
-  if (href) {
-    return `<a class="msg-card" href="${escapeAttr(href)}" data-external>${inner}</a>`;
-  }
-  return `<article class="msg-card">${inner}</article>`;
+  // 卡片本身不放整块链接：跳转交给里面的原视频条目，避免误点整张卡片
+  return `<article class="msg-card">${users}${
+    showContent ? `<div class="msg-content">${escapeHtml(content)}</div>` : ""
+  }${sourceHtml(item)}${
+    image ? `<div class="msg-image">${imgTag(image, { w: 240, h: 140, alt: "" })}</div>` : ""
+  }${meta}</article>`;
 }
 
 async function renderList(root, ctx, tab, body) {

@@ -17,7 +17,6 @@ import {
   videoSubtitles,
   watchLaterAdd,
 } from "../api.js";
-import { filterRelatedVideos } from "../filters.js";
 import { icon } from "../icons.js";
 import { ensureLogin } from "../login.js";
 import { orderStreams, videoPlayOptions } from "../media.js";
@@ -225,9 +224,9 @@ export async function render(root, ctx) {
   const cid = currentPage.cid || info.cid;
   const owner = info.owner || { mid: 0, name: "未知 UP 主", face: "" };
   const stat = info.stat || {};
-  const related = filterRelatedVideos(
-    (info.related || []).filter((item) => item && item.bvid !== bvid)
-  ).slice(0, 14);
+  const related = (info.related || [])
+    .filter((item) => item && item.bvid !== bvid)
+    .slice(0, 14);
   const queryStart = Math.max(0, Number(ctx.query.get("t")) || 0);
   const initialStart = queryStart > 0 ? queryStart : 0;
   const description = String(info.desc || "").trim();

@@ -554,3 +554,57 @@ pub struct LivePlayInfo {
     pub qualities: Vec<LiveQuality>,
     pub accept_qn: Vec<i32>,
 }
+
+/// 动态页左栏：有更新的 UP 主
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DynUp {
+    pub mid: i64,
+    pub name: String,
+    pub face: String,
+}
+
+/// 动态页右栏：关注的 UP 主正在直播
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FollowingLive {
+    pub room_id: i64,
+    pub uid: i64,
+    pub name: String,
+    pub face: String,
+    pub cover: String,
+    pub title: String,
+    pub area: String,
+    pub online: i64,
+}
+
+/// 直播弹幕服务器
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DanmuServer {
+    pub host: String,
+    pub wss_port: i64,
+}
+
+/// 直播弹幕连接凭据
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DanmuConf {
+    pub token: String,
+    pub host: String,
+    pub wss_port: i64,
+    pub servers: Vec<DanmuServer>,
+}
+
+/// 历史弹幕
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DanmuHistoryItem {
+    pub text: String,
+    pub uname: String,
+    pub uid: i64,
+    pub timeline: String,
+    pub color: u32,
+    pub mode: i32,
+}
+
+/// 历史弹幕分页
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DanmuHistory {
+    pub items: Vec<DanmuHistoryItem>,
+}

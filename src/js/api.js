@@ -28,11 +28,6 @@ export function homeFeed(kind = "popular", pn = 1, rid = 0) {
   return call("home_feed", { kind, pn, rid });
 }
 
-/** 官方首页推荐流；fresh_idx 递增即可拿到下一批。 */
-export function recommendFeed(freshIdx = 1) {
-  return call("recommend_feed", { freshIdx });
-}
-
 export function search(keyword, page = 1, kind = "video", order = "totalrank") {
   return call("search", { keyword, page, kind, order });
 }
@@ -205,6 +200,26 @@ export function msgFeed(kind = "reply", cursorId = 0, cursorTime = 0) {
 
 export function msgUnread() {
   return call("msg_unread");
+}
+
+/** 动态页左栏：有更新的 UP 主（需要登录）。 */
+export function dynamicUplist() {
+  return call("dynamic_uplist");
+}
+
+/** 动态页右栏：关注的 UP 主正在直播（需要登录）。 */
+export function liveFollowing() {
+  return call("live_following");
+}
+
+/** 直播弹幕服务器凭据。 */
+export function liveDanmuConf(roomId) {
+  return call("live_danmu_conf", { roomId });
+}
+
+/** 直播间历史弹幕。 */
+export function liveDanmuHistory(roomId) {
+  return call("live_danmu_history", { roomId });
 }
 
 // ---------------- Misc ----------------

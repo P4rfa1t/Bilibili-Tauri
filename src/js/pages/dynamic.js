@@ -1,11 +1,11 @@
 /**
- * 动态 —— 关注的 UP 主动态流（需要登录）。
+ * 动态 —— 官方三栏布局：左侧「有更新的 UP 主」、中间动态流、右侧「关注 UP 主正在直播」。
  *
  * 后端把 B 站的动态结构拍平成 kind + archive/live/orig，
  * 这里只负责排版：正文、图文、视频卡片、直播卡片、转发。
  */
 
-import { dynamicFeed, openExternal } from "../api.js";
+import { dynamicFeed, dynamicUplist, liveFollowing, openExternal } from "../api.js";
 import { icon } from "../icons.js";
 import { store } from "../store.js";
 import {
@@ -142,6 +142,53 @@ function cardHtml(item) {
   </article>`;
 }
 
+// ------------------------------------------------------------ 左栏：有更新的 UP 主
+
+function upListHtml(list) {
+  if (!list.length) {
+    return `<div class="dyn-side-empty">关注的 UP 主暂时没有新动态</div>`;
+  }
+  return list
+    .map(
+      (up) => `<a class="dyn-up" href="#/space/${Number(up.mid) || 0}" title="${escapeAttr(
+        up.name || ""
+      )}">
+        ${avatarTag(up.face, up.name, "avatar avatar-sm")}
+        <span class="dyn-up-name">${escapeHtml(up.name || "")}</span>
+      </a>`
+    )
+    .join("");
+}
+
+// ------------------------------------------------------------ 右栏：关注 UP 主正在直播
+
+function followingLiveHtml(list) {
+  if (!list.length) {
+    return `<div class="dyn-side-empty">关注的 UP 主都没在直播</div>`;
+  }
+  return list
+    .map(
+      (room) => `<a class="dyn-following" href="#/live/${Number(room.room_id) || 0}">
+        <div class="dyn-following-cover">
+          ${imgTag(room.cover, { w: 260, h: 146, alt: room.title })}
+          <span class="live-card-badge"><i class="live-dot"></i>直播中</span>
+        </div>
+        <div class="dyn-following-body">
+          <div class="dyn-following-title">${escapeHtml(room.title || "直播间")}</div>
+          <div class="dyn-following-meta">
+            ${avatarTag(room.face, room.name, "avatar avatar-xs")}
+            <span class="dyn-following-name">${escapeHtml(room.name || "")}</span>
+          </div>
+          <div class="dyn-following-sub">
+            ${room.area ? `<span>${escapeHtml(room.area)}</span>` : ""}
+            <span>${icon("eye", 12)}${formatCount(room.online)}</span>
+          </div>
+        </div>
+      </a>`
+    )
+    .join("");
+}
+
 export async function render(root, ctx) {
   const onAuth = () => ctx.refresh();
   window.addEventListener("app:auth", onAuth);
@@ -152,14 +199,53 @@ export async function render(root, ctx) {
     return detachAuth;
   }
 
-  root.innerHTML = `<div class="dyn-toolbar">
-      <span class="rec-hint">按关注时间排序，下拉自动加载更多</span>
-    </div>
-    <div class="dyn-list" data-dyn-list>${skeletonRows(5)}</div>`;
+  root.innerHTML = `<div class="dyn-page">
+      <aside class="dyn-side dyn-side-left">
+        <div class="dyn-side-title">有更新</div>
+        <div class="dyn-up-list" data-dyn-uplist>
+          <div class="dyn-side-empty">加载中…</div>
+        </div>
+      </aside>
+      <div class="dyn-main">
+        <div class="dyn-toolbar">
+          <span class="rec-hint">按关注时间排序，下拉自动加载更多</span>
+        </div>
+        <div class="dyn-list" data-dyn-list>${skeletonRows(5)}</div>
+      </div>
+      <aside class="dyn-side dyn-side-right">
+        <div class="dyn-side-title"><i class="live-dot"></i>关注直播</div>
+        <div class="dyn-following-list" data-dyn-following>
+          <div class="dyn-side-empty">加载中…</div>
+        </div>
+      </aside>
+    </div>`;
 
   const list = root.querySelector("[data-dyn-list]");
+  const upList = root.querySelector("[data-dyn-uplist]");
+  const liveList = root.querySelector("[data-dyn-following]");
 
-  // 图片查看与“查看全文”都以事件委托处理，动态插入的卡片也能用
+  // 左栏、右栏与主列表各自加载，任一失败都不影响其余两栏
+  dynamicUplist()
+    .then((items) => {
+      if (ctx.signal.aborted || !upList) return;
+      upList.innerHTML = upListHtml(Array.isArray(items) ? items : []);
+    })
+    .catch(() => {
+      if (ctx.signal.aborted || !upList) return;
+      upList.innerHTML = `<div class="dyn-side-empty">暂时取不到更新列表</div>`;
+    });
+
+  liveFollowing()
+    .then((items) => {
+      if (ctx.signal.aborted || !liveList) return;
+      liveList.innerHTML = followingLiveHtml(Array.isArray(items) ? items : []);
+    })
+    .catch(() => {
+      if (ctx.signal.aborted || !liveList) return;
+      liveList.innerHTML = `<div class="dyn-side-empty">暂时取不到关注直播</div>`;
+    });
+
+  // 图片查看与「查看全文」都以事件委托处理，动态插入的卡片也能用
   const onClick = async (event) => {
     const pic = event.target.closest("[data-view-image]");
     if (pic) {
@@ -206,7 +292,7 @@ export async function render(root, ctx) {
       list.innerHTML = emptyState(
         "还没有动态",
         "关注一些 UP 主后，这里会出现他们的最新动态。",
-        `<a class="btn btn-primary" href="#/recommend">去推荐看看</a>`,
+        `<a class="btn btn-primary" href="#/home?channel=hot">去首页看看</a>`,
         "at-sign"
       );
     } else {

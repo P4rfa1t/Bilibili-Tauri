@@ -41,6 +41,7 @@ const ICONS = {
   "message-square": '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/><path d="M7 9h10M7 13h6"/>',
   bell: '<path d="M18 8a6 6 0 1 0-12 0c0 5-2 6.5-2 6.5h16S18 13 18 8Z"/><path d="M10.3 20a2 2 0 0 0 3.4 0"/>',
   "at-sign": '<circle cx="12" cy="12" r="4"/><path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8"/>',
+  activity: '<path d="M3 12h4l2.5-7 5 14L17 12h4"/>',
   "repeat-2": '<path d="m2 9 3-3 3 3"/><path d="M5 6h11a4 4 0 0 1 0 8h-1"/><path d="m22 15-3 3-3-3"/><path d="M19 18H8a4 4 0 0 1 0-8h1"/>',
   heart: '<path d="M20.4 5.6a5.4 5.4 0 0 0-7.7 0L12 6.3l-.7-.7a5.4 5.4 0 0 0-7.7 7.7L12 21l8.4-7.7a5.4 5.4 0 0 0 0-7.7Z"/>',
   "rotate-ccw": '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>',

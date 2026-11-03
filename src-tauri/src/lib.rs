@@ -34,7 +34,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::home_feed,
-            commands::recommend_feed,
             commands::search,
             commands::search_suggest,
             commands::search_trending,
@@ -71,8 +70,12 @@ pub fn run() {
             commands::live_room_detail,
             commands::live_play_info,
             commands::dynamic_feed,
+            commands::dynamic_uplist,
             commands::msg_feed,
             commands::msg_unread,
+            commands::live_following,
+            commands::live_danmu_conf,
+            commands::live_danmu_history,
             commands::open_url,
             commands::app_version,
         ])

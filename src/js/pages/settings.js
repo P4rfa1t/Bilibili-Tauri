@@ -138,33 +138,6 @@ function numberRow(
   </div>`;
 }
 
-function kwChipHtml(setting, word) {
-  return `<span class="kw-chip">${escapeHtml(word)}<button type="button" class="kw-remove"
-    data-kw-remove="${setting}" data-kw-word="${escapeAttr(word)}"
-    aria-label="删除 ${escapeAttr(word)}">${icon("x", 12)}</button></span>`;
-}
-
-function kwListHtml(setting) {
-  const words = store.get(setting) || [];
-  if (!words.length) return '<span class="kw-empty">尚未添加</span>';
-  return words.map((word) => kwChipHtml(setting, word)).join("");
-}
-
-function keywordEditor(label, desc, setting) {
-  return `<div class="set-row">
-    <div class="set-label"><div class="t">${escapeHtml(label)}</div><div class="d">${escapeHtml(
-    desc
-  )}</div></div>
-    <div class="set-control kw-control">
-      <div class="kw-list" data-kw-list="${setting}">${kwListHtml(setting)}</div>
-      <div class="kw-input-row">
-        <input class="input input-sm" type="text" placeholder="输入后回车添加" data-kw-input="${setting}">
-        <button class="btn btn-sm btn-soft" type="button" data-kw-add="${setting}">添加</button>
-      </div>
-    </div>
-  </div>`;
-}
-
 const SHORTCUTS = [
   ["空格 / K", "播放 / 暂停"],
   ["← / →", "快退 / 快进 5 秒"],
@@ -315,64 +288,6 @@ export async function render(root, ctx) {
     </section>
 
     <section class="settings-card">
-      <div class="settings-card-head">${icon("compass", 18)}推荐流</div>
-      <div class="settings-card-sub">推荐内容来自哔哩哔哩官方首页推荐接口，过滤规则只影响本地显示。</div>
-      ${switchRow(
-        "继续上次刷新批次",
-        "重新打开应用时从上次的推荐批次继续，而不是从头刷新。",
-        "recommendKeepRefresh",
-        store.get("recommendKeepRefresh")
-      )}
-      ${switchRow(
-        "标记上次浏览位置",
-        "在推荐流里显示“上次看到这里”的分隔线。",
-        "recommendLastSeen",
-        store.get("recommendLastSeen")
-      )}
-      ${switchRow(
-        "关注 UP 主豁免",
-        "过滤时跳过已关注的 UP 主，避免把常看的内容滤掉。",
-        "exemptFollowed",
-        store.get("exemptFollowed")
-      )}
-      ${switchRow(
-        "同时过滤相关推荐",
-        "视频页右侧的相关推荐也套用同一套过滤规则。",
-        "filterRelated",
-        store.get("filterRelated")
-      )}
-      ${rangeRow("最低点赞率", "点赞数与播放量的比值低于该值时隐藏。", "likeRateMin", store.get("likeRateMin"), {
-        min: 0,
-        max: 20,
-        step: 0.5,
-        scale: 100,
-        format: "percent",
-      })}
-      ${numberRow("最低播放量", "播放量低于该值时隐藏，0 表示不限。", "playMin", store.get("playMin"), {
-        min: 0,
-        max: 100000000,
-        step: 1000,
-        unit: "次",
-      })}
-      ${numberRow("最短时长", "时长低于该值时隐藏，0 表示不限。", "durationMin", store.get("durationMin"), {
-        min: 0,
-        max: 120,
-        step: 1,
-        scale: 1 / 60,
-        unit: "分钟",
-      })}
-      ${numberRow("最长时长", "时长高于该值时隐藏，0 表示不限。", "durationMax", store.get("durationMax"), {
-        min: 0,
-        max: 120,
-        step: 1,
-        scale: 1 / 60,
-        unit: "分钟",
-      })}
-      ${keywordEditor("标题关键词", "标题命中任一关键词时隐藏，回车或逗号分隔。", "titleFilters")}
-      ${keywordEditor("分区关键词", "分区或标签命中任一关键词时隐藏。", "partitionFilters")}
-    </section>
-
-    <section class="settings-card">
       <div class="settings-card-head">${icon("play-circle", 18)}音视频</div>
       <div class="settings-card-sub">影响取流参数；目标档位不可用时会自动回退到可用的最高档。</div>
       ${switchRow(
@@ -446,7 +361,7 @@ export async function render(root, ctx) {
         </div>
       </div>
       <div class="set-row">
-        <div class="set-label"><div class="t">恢复默认设置</div><div class="d">主题、播放、弹幕、推荐流与音视频偏好都会恢复默认值。</div></div>
+        <div class="set-label"><div class="t">恢复默认设置</div><div class="d">主题、播放、弹幕与音视频偏好都会恢复默认值。</div></div>
         <div class="set-control">
           <button class="btn btn-sm btn-danger-soft" type="button" data-reset>恢复默认</button>
         </div>
@@ -584,51 +499,6 @@ export async function render(root, ctx) {
     store.set("theme", button.dataset.themeValue);
   });
 
-  const refreshKeywordList = (setting) => {
-    const list = root.querySelector(`[data-kw-list="${setting}"]`);
-    if (list) list.innerHTML = kwListHtml(setting);
-  };
-
-  const addKeywords = (setting) => {
-    const input = root.querySelector(`[data-kw-input="${setting}"]`);
-    const raw = String(input?.value || "").trim();
-    if (!raw) return;
-    const words = raw.split(/[,，;；\s]+/).filter(Boolean);
-    const list = [...(store.get(setting) || [])];
-    words.forEach((word) => {
-      if (!list.includes(word)) list.push(word);
-    });
-    store.set(setting, list.slice(0, 30));
-    if (input) input.value = "";
-    refreshKeywordList(setting);
-  };
-
-  root.addEventListener("keydown", (event) => {
-    const input = event.target.closest("[data-kw-input]");
-    if (!input) return;
-    if (event.key === "Enter" || event.key === "," || event.key === "，") {
-      event.preventDefault();
-      addKeywords(input.dataset.kwInput);
-    }
-  });
-
-  root.addEventListener("click", (event) => {
-    const add = event.target.closest("[data-kw-add]");
-    if (add) {
-      addKeywords(add.dataset.kwAdd);
-      return;
-    }
-    const remove = event.target.closest("[data-kw-remove]");
-    if (!remove) return;
-    const setting = remove.dataset.kwRemove;
-    const word = remove.dataset.kwWord;
-    store.set(
-      setting,
-      (store.get(setting) || []).filter((item) => item !== word)
-    );
-    refreshKeywordList(setting);
-  });
-
   root.querySelector("[data-login]")?.addEventListener("click", () => openLoginModal());
 
   root.querySelector("[data-logout]")?.addEventListener("click", async () => {
@@ -670,7 +540,7 @@ export async function render(root, ctx) {
   root.querySelector("[data-reset]")?.addEventListener("click", async () => {
     const ok = await confirmDialog({
       title: "恢复默认设置",
-      message: "主题、播放、弹幕、音量、推荐流与音视频偏好都会恢复默认，确定继续吗？",
+      message: "主题、播放、弹幕、音量与音视频偏好都会恢复默认，确定继续吗？",
       okText: "恢复默认",
       danger: true,
     });

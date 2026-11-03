@@ -1,8 +1,8 @@
 /**
- * 首页频道容器：动态 / 直播 / 推荐 / 热门 / 追番 / 影视。
+ * 首页频道容器：动态 / 直播 / 热门 / 追番 / 影视。
  *
  * 频道本身不产出内容，只负责在顶部放一条频道栏，
- * 然后把渲染交给对应页面模块（动态、直播、推荐、首页、番剧）。
+ * 然后把渲染交给对应页面模块（动态、直播、首页、番剧）。
  */
 
 import {
@@ -16,7 +16,6 @@ import * as bangumiPage from "./bangumi.js";
 import * as dynamicPage from "./dynamic.js";
 import * as homePage from "./home.js";
 import * as livePage from "./live.js";
-import * as recommendPage from "./recommend.js";
 
 /** 追番默认番剧，影视默认电影。 */
 const BANGUMI_DEFAULT_TYPE = 1;
@@ -24,7 +23,6 @@ const FILM_DEFAULT_TYPE = 2;
 
 function routeFor(channel, query) {
   if (channel === "dynamic") return { module: dynamicPage, query: new URLSearchParams() };
-  if (channel === "recommend") return { module: recommendPage, query: new URLSearchParams() };
   if (channel === "live") return { module: livePage, query: channelQuery(query) };
   if (channel === "bangumi") {
     const next = channelQuery(query);

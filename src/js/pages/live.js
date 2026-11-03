@@ -8,6 +8,7 @@ import {
 } from "../api.js";
 import { icon } from "../icons.js";
 import { mpegtsConfig, orderLiveUrls } from "../media.js";
+import { LiveDanmaku } from "../player/live-danmaku.js";
 import { store } from "../store.js";
 import {
   avatarTag,
@@ -340,6 +341,89 @@ function roomMeta(detail, play) {
   return parts.join("");
 }
 
+function qualityOptions(play) {
+  const list = Array.isArray(play?.qualities) ? play.qualities : [];
+  const accept = Array.isArray(play?.accept_qn) ? play.accept_qn.map(Number) : [];
+  const usable = accept.length
+    ? list.filter((item) => accept.includes(Number(item.qn)))
+    : list.slice();
+  return (usable.length ? usable : list).filter((item) => Number(item.qn) > 0);
+}
+
+function qualityPicker(play) {
+  const current = Number(play?.quality) || 0;
+  const items = qualityOptions(play);
+  if (!items.length) return "";
+  const rows = items
+    .map(
+      (item) =>
+        `<button class="live-quality-item${
+          Number(item.qn) === current ? " active" : ""
+        }" data-quality-qn="${Number(item.qn)}" type="button">${escapeHtml(
+          item.desc || String(item.qn)
+        )}</button>`
+    )
+    .join("");
+  return `<div class="live-quality" data-quality>
+    <button class="live-quality-btn" data-quality-toggle type="button">
+      ${icon("gauge", 14)}<span data-quality-label>${escapeHtml(
+        play?.quality_desc || "自动"
+      )}</span>${icon("chevron-down", 12)}
+    </button>
+    <div class="live-quality-menu" data-quality-menu hidden>${rows}</div>
+  </div>`;
+}
+
+function playerShellHtml(play, cover) {
+  return `<video
+            data-live-video
+            playsinline
+            controls
+            preload="none"
+            referrerpolicy="no-referrer"
+            poster="${escapeAttr(cover || "")}"
+          ></video>
+          <canvas class="live-danmaku-canvas" data-live-danmaku></canvas>
+          <div class="live-player-overlay" data-live-overlay>
+            <span class="live-connecting"><span class="spinner"></span>正在加载直播间…</span>
+          </div>
+          <span class="live-buffering" data-live-buffering hidden><span class="spinner"></span>缓冲中…</span>
+          ${qualityPicker(play)}`;
+}
+
+function mountPlayer(root, ctx, detail, play, roomId) {
+  const stopPlayer = initPlayer(root, ctx, detail, play);
+  const canvas = root.querySelector("[data-live-danmaku]");
+  let danmaku = null;
+  if (canvas && Number(detail?.live_status) === 1) {
+    danmaku = new LiveDanmaku(canvas, {
+      roomId: Number(detail.room_id) || roomId,
+      onStatus: (status, message) => paintDanmakuStatus(root, status, message),
+    });
+    root.__liveDanmaku = danmaku;
+  }
+  return () => {
+    danmaku?.destroy();
+    if (root.__liveDanmaku === danmaku) root.__liveDanmaku = null;
+    stopPlayer();
+  };
+}
+
+const DANMAKU_STATUS = {
+  idle: "弹幕待命",
+  connecting: "弹幕连接中",
+  live: "弹幕已连接",
+  closed: "弹幕已断开",
+  error: "弹幕连接失败",
+};
+
+function paintDanmakuStatus(root, status, message) {
+  const node = root.querySelector("[data-danmu-status]");
+  if (!node) return;
+  node.textContent = message || DANMAKU_STATUS[status] || "弹幕待命";
+  node.dataset.state = status;
+}
+
 function initPlayer(root, ctx, detail, play) {
   const video = root.querySelector("[data-live-video]");
   const overlay = root.querySelector("[data-live-overlay]");
@@ -523,6 +607,15 @@ async function renderRoom(root, ctx, roomId) {
       <a class="btn btn-sm btn-outline" href="#/live">${icon("arrow-left", 14)}直播首页</a>
       ${roomBadge(detail, play)}
       <div class="live-room-actions">
+        ${
+          Number(detail.live_status) === 1
+            ? `<button class="btn btn-sm btn-outline live-danmu-toggle" data-danmu-toggle type="button">
+                ${icon("message-square", 14)}<span data-danmu-label>${
+                  store.get("danmaku") === false ? "弹幕已关" : "弹幕已开"
+                }</span><span class="live-danmu-state" data-danmu-status data-state="idle">弹幕待命</span>
+              </button>`
+            : ""
+        }
         <button class="btn btn-sm btn-outline" data-room-refresh type="button">${icon(
           "refresh-cw",
           14
@@ -537,18 +630,7 @@ async function renderRoom(root, ctx, roomId) {
     <div class="live-watch-layout">
       <div class="live-watch-main">
         <div class="live-player-shell">
-          <video
-            data-live-video
-            playsinline
-            controls
-            preload="none"
-            referrerpolicy="no-referrer"
-            poster="${escapeAttr(cover || "")}"
-          ></video>
-          <div class="live-player-overlay" data-live-overlay>
-            <span class="live-connecting"><span class="spinner"></span>正在加载直播间…</span>
-          </div>
-          <span class="live-buffering" data-live-buffering hidden><span class="spinner"></span>缓冲中…</span>
+          ${playerShellHtml(play, cover)}
         </div>
 
         <div class="live-room-info">
@@ -604,7 +686,9 @@ async function renderRoom(root, ctx, roomId) {
               [detail.parent_area_name, detail.area_name].filter(Boolean).join(" · ") || "未知"
             )}</dd></div>
             <div><dt>开播时间</dt><dd>${escapeHtml(detail.live_time || "—")}</dd></div>
-            <div><dt>清晰度</dt><dd>${escapeHtml(play?.quality_desc || "自动")}</dd></div>
+            <div><dt>清晰度</dt><dd data-quality-dd>${escapeHtml(
+              play?.quality_desc || "自动"
+            )}</dd></div>
             <div><dt>房间号</dt><dd>${escapeHtml(String(detail.room_id || roomId))}</dd></div>
           </dl>
         </div>
@@ -621,7 +705,104 @@ async function renderRoom(root, ctx, roomId) {
     });
   });
 
-  return initPlayer(root, ctx, detail, play);
+  let stopPlayback = mountPlayer(root, ctx, detail, play, roomId);
+
+  // 清晰度：重新取流后只重建播放器区域，页面其余部分保持不动
+  let switching = false;
+  const remount = (nextPlay) => {
+    const shell = root.querySelector(".live-player-shell");
+    if (!shell) return;
+    stopPlayback();
+    shell.innerHTML = playerShellHtml(nextPlay, cover);
+    const dd = root.querySelector("[data-quality-dd]");
+    if (dd) dd.textContent = nextPlay?.quality_desc || "自动";
+    stopPlayback = mountPlayer(root, ctx, detail, nextPlay, roomId);
+    bindQuality();
+  };
+
+  const switchQuality = async (qn) => {
+    if (switching) return;
+    switching = true;
+    const shell = root.querySelector(".live-player-shell");
+    const label = root.querySelector("[data-quality-label]");
+    const previous = label?.textContent || "";
+    if (label) label.textContent = "切换中…";
+    try {
+      store.set("liveQuality", qn);
+      const nextPlay = await livePlayInfo(roomId, qn);
+      remount(nextPlay);
+      toast(`已切换到 ${nextPlay?.quality_desc || qn}`, "success");
+    } catch (error) {
+      if (label) label.textContent = previous;
+      toast(errorText(error), "error");
+    } finally {
+      switching = false;
+    }
+  };
+
+  function bindQuality() {
+    const box = root.querySelector("[data-quality]");
+    const menu = root.querySelector("[data-quality-menu]");
+    if (!box || !menu) return;
+    const toggle = box.querySelector("[data-quality-toggle]");
+    toggle?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      menu.hidden = !menu.hidden;
+      box.classList.toggle("open", !menu.hidden);
+    });
+    menu.querySelectorAll("[data-quality-qn]").forEach((button) => {
+      button.addEventListener("click", () => {
+        menu.hidden = true;
+        box.classList.remove("open");
+        if (button.classList.contains("active")) return;
+        switchQuality(Number(button.dataset.qualityQn));
+      });
+    });
+  }
+  bindQuality();
+
+  const closeQuality = (event) => {
+    const box = root.querySelector("[data-quality]");
+    if (!box || box.contains(event.target)) return;
+    const menu = root.querySelector("[data-quality-menu]");
+    if (menu) menu.hidden = true;
+    box.classList.remove("open");
+  };
+  document.addEventListener("click", closeQuality);
+
+  // 弹幕开关
+  const danmuToggle = root.querySelector("[data-danmu-toggle]");
+  danmuToggle?.addEventListener("click", () => {
+    const next = store.get("danmaku") === false;
+    store.set("danmaku", next);
+    const label = danmuToggle.querySelector("[data-danmu-label]");
+    if (label) label.textContent = next ? "弹幕已开" : "弹幕已关";
+    danmuToggle.classList.toggle("off", !next);
+    // 就地开关，避免重连 WebSocket
+    root.__liveDanmaku?.setEnabled(next);
+    if (!next) paintDanmakuStatus(root, "idle", "弹幕已关闭");
+  });
+
+  // 设置页改透明度 / 字号 / 速度 / 显示区域时，直播间里立刻生效
+  const unsubscribe = store.subscribe((change) => {
+    const key = change?.key || "";
+    if (!["danmaku", "danmakuOpacity", "danmakuSize", "danmakuSpeed", "danmakuArea"].includes(key)) {
+      return;
+    }
+    root.__liveDanmaku?.refreshConfig();
+    const label = danmuToggle?.querySelector("[data-danmu-label]");
+    if (label && key === "danmaku") {
+      const on = store.get("danmaku") !== false;
+      label.textContent = on ? "弹幕已开" : "弹幕已关";
+      danmuToggle?.classList.toggle("off", !on);
+    }
+  });
+
+  return () => {
+    unsubscribe();
+    document.removeEventListener("click", closeQuality);
+    stopPlayback();
+  };
 }
 
 export async function render(root, ctx) {

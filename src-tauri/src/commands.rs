@@ -40,18 +40,6 @@ pub async fn home_feed(
 }
 
 #[tauri::command]
-pub async fn recommend_feed(
-    state: State<'_, AppState>,
-    fresh_idx: Option<u32>,
-) -> Result<PageResult<VideoCard>, String> {
-    let login = login_of(&state);
-    state
-        .client
-        .recommend(fresh_idx.unwrap_or(1), &login)
-        .await
-}
-
-#[tauri::command]
 pub async fn search(
     state: State<'_, AppState>,
     keyword: String,
@@ -511,6 +499,40 @@ pub async fn msg_feed(
 pub async fn msg_unread(state: State<'_, AppState>) -> Result<UnreadCount, String> {
     let login = login_of(&state);
     state.client.msg_unread(&login).await
+}
+
+// ---------------- 动态页左右栏 ----------------
+
+#[tauri::command]
+pub async fn dynamic_uplist(state: State<'_, AppState>) -> Result<Vec<DynUp>, String> {
+    let login = login_of(&state);
+    state.client.dynamic_uplist(&login).await
+}
+
+#[tauri::command]
+pub async fn live_following(state: State<'_, AppState>) -> Result<Vec<FollowingLive>, String> {
+    let login = login_of(&state);
+    state.client.live_following(&login).await
+}
+
+// ---------------- 直播弹幕 ----------------
+
+#[tauri::command]
+pub async fn live_danmu_conf(
+    state: State<'_, AppState>,
+    room_id: i64,
+) -> Result<DanmuConf, String> {
+    let login = login_of(&state);
+    state.client.live_danmu_conf(room_id, &login).await
+}
+
+#[tauri::command]
+pub async fn live_danmu_history(
+    state: State<'_, AppState>,
+    room_id: i64,
+) -> Result<DanmuHistory, String> {
+    let login = login_of(&state);
+    state.client.live_danmu_history(room_id, &login).await
 }
 
 // ---------------- 其他 ----------------

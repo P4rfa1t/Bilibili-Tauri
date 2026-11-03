@@ -1,6 +1,6 @@
 /** Application shell: titlebar, sidebar, global search, account menu, shortcuts. */
 
-import { cachedTrending, isTauri, msgUnread, searchSuggest } from "./api.js";
+import { cachedTrending, dynamicUplist, isTauri, msgUnread, searchSuggest } from "./api.js";
 import { icon, mountIcons } from "./icons.js";
 import { logoutUser, openLoginModal, refreshUser } from "./login.js";
 import * as router from "./router.js";
@@ -32,6 +32,8 @@ const searchPop = document.getElementById("search-pop");
 const searchClear = document.getElementById("search-clear");
 const msgButton = document.getElementById("msg-btn");
 const msgDot = document.getElementById("msg-dot");
+const dynButton = document.getElementById("dyn-btn");
+const dynDot = document.getElementById("dyn-dot");
 const mobileQuery = window.matchMedia("(max-width: 980px)");
 
 let searchPopSeq = 0;
@@ -144,33 +146,48 @@ function syncAccount() {
   refreshUnread();
 }
 
-/** 顶栏铃铛的未读红点：只显示数量级别，不打断阅读。 */
+/** 顶栏铃铛与动态按钮的未读红点：只显示数量级别，不打断阅读。 */
 let unreadSeq = 0;
 
+function paintDot(dot, button, count, baseTitle, label) {
+  if (!dot) return;
+  if (count > 0) {
+    dot.textContent = count > 99 ? "99+" : String(count);
+    dot.classList.remove("hidden");
+    if (button) button.title = `${label}（${count} 条未读）`;
+  } else {
+    dot.classList.add("hidden");
+    if (button) button.title = baseTitle;
+  }
+}
+
 async function refreshUnread() {
-  if (!msgDot) return;
+  if (!msgDot && !dynDot) return;
   const seq = ++unreadSeq;
   if (!store.isLoggedIn()) {
-    msgDot.classList.add("hidden");
-    msgButton?.removeAttribute("data-count");
+    paintDot(msgDot, msgButton, 0, "消息", "消息");
+    paintDot(dynDot, dynButton, 0, "动态", "动态");
     return;
   }
-  try {
-    const unread = await msgUnread();
-    if (seq !== unreadSeq) return;
-    const total = Number(unread?.total) || 0;
-    if (total > 0) {
-      msgDot.textContent = total > 99 ? "99+" : String(total);
-      msgDot.classList.remove("hidden");
-      if (msgButton) msgButton.title = `消息（${total} 条未读）`;
-    } else {
-      msgDot.classList.add("hidden");
-      if (msgButton) msgButton.title = "消息";
-    }
-  } catch (_) {
-    if (seq !== unreadSeq) return;
-    msgDot.classList.add("hidden");
-  }
+  // 两路互不阻塞：消息未读数失败不该拖掉动态红点，反之亦然
+  msgUnread()
+    .then((unread) => {
+      if (seq !== unreadSeq) return;
+      paintDot(msgDot, msgButton, Number(unread?.total) || 0, "消息", "消息");
+    })
+    .catch(() => {
+      if (seq !== unreadSeq) return;
+      paintDot(msgDot, msgButton, 0, "消息", "消息");
+    });
+  dynamicUplist()
+    .then((list) => {
+      if (seq !== unreadSeq) return;
+      paintDot(dynDot, dynButton, (list || []).length, "动态", "动态更新");
+    })
+    .catch(() => {
+      if (seq !== unreadSeq) return;
+      paintDot(dynDot, dynButton, 0, "动态", "动态更新");
+    });
 }
 
 function openAccountMenu() {
@@ -505,6 +522,28 @@ function initWindowControls() {
     controls?.remove();
     return;
   }
+
+  // 自绘标题栏：Tauri 2 的 data-tauri-drag-region 不继承子元素，而标题栏里
+  // 全是按钮和输入框，可拖区域基本为零，这里手动调 startDragging 补上。
+  const titlebar = document.getElementById("titlebar");
+  const interactive = "button, a, input, textarea, select, [data-win], [data-no-drag]";
+  titlebar?.addEventListener("pointerdown", async (event) => {
+    if (event.button !== 0) return;
+    if (event.target.closest(interactive)) return;
+    try {
+      await appWindow.startDragging();
+    } catch (error) {
+      console.error("startDragging failed", error);
+    }
+  });
+  titlebar?.addEventListener("dblclick", async (event) => {
+    if (event.target.closest(interactive)) return;
+    try {
+      await appWindow.toggleMaximize();
+    } catch (error) {
+      console.error("toggleMaximize failed", error);
+    }
+  });
 
   controls?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-win]");
