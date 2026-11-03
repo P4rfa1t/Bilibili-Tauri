@@ -1,0 +1,33 @@
+[package]
+name = "bilibili-tauri"
+version = "0.1.0"
+description = "轻量级哔哩哔哩桌面客户端（Tauri 2 + Rust + WebView2）"
+authors = ["Bilibili-Tauri contributors"]
+edition = "2021"
+
+[lib]
+name = "bilibili_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "gzip", "brotli", "deflate", "rustls-tls", "stream"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "net", "time", "io-util"] }
+axum = "0.8"
+url = "2"
+md-5 = "0.10"
+base64 = "0.22"
+qrcode = { version = "0.14", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png"] }
+open = "5"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

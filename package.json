@@ -1,0 +1,15 @@
+{
+  "name": "bilibili-tauri",
+  "productName": "Bilibili-Tauri",
+  "version": "0.1.0",
+  "description": "轻量级哔哩哔哩桌面客户端，基于 Tauri (Rust + WebView2)，替代沉重的 Electron 版本",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

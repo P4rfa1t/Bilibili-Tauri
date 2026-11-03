@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#0f1115" />
+    <title>Bilibili-Tauri</title>
+    <link rel="icon" href="./favicon.png" type="image/png" />
+    <link rel="stylesheet" href="./styles/base.css" />
+    <link rel="stylesheet" href="./styles/layout.css" />
+    <link rel="stylesheet" href="./styles/components.css" />
+    <link rel="stylesheet" href="./styles/player.css" />
+    <link rel="stylesheet" href="./styles/pages.css" />
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem("bilibili-tauri:settings") || "{}";
+          var settings = JSON.parse(raw);
+          var theme = settings.theme || "system";
+          var dark =
+            theme === "dark" ||
+            (theme !== "light" &&
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+        } catch (_) {
+          document.documentElement.dataset.theme = "dark";
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="app" id="app">
+      <header class="titlebar" id="titlebar" data-tauri-drag-region>
+        <div class="tb-left">
+          <button class="icon-btn tb-menu" id="sidebar-toggle" title="收起侧边栏" aria-label="切换侧边栏">
+            <span data-icon="panel-left"></span>
+          </button>
+          <a class="brand" href="#/home" title="Bilibili-Tauri">
+            <span class="brand-mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M8 4 5.5 1.8M16 4l2.5-2.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <rect x="2.5" y="5.5" width="19" height="14.5" rx="4" fill="currentColor" />
+                <path d="M10 9.6v6.2l5.2-3.1L10 9.6Z" fill="#fff" />
+              </svg>
+            </span>
+            <span class="brand-text">Bilibili-Tauri</span>
+          </a>
+          <div class="tb-history">
+            <button class="icon-btn" id="nav-back" title="后退 (Alt+←)" aria-label="后退">
+              <span data-icon="chevron-left"></span>
+            </button>
+            <button class="icon-btn" id="nav-forward" title="前进 (Alt+→)" aria-label="前进">
+              <span data-icon="chevron-right"></span>
+            </button>
+          </div>
+        </div>
+
+        <div class="tb-center">
+          <form class="global-search" id="global-search" role="search" autocomplete="off">
+            <span class="search-icon" data-icon="search"></span>
+            <input
+              id="search-input"
+              type="search"
+              placeholder="搜索视频、UP主、番剧…"
+              aria-label="搜索"
+              spellcheck="false"
+            />
+            <kbd class="search-kbd" id="search-kbd">Ctrl K</kbd>
+            <button type="button" class="icon-btn search-clear hidden" id="search-clear" title="清空" aria-label="清空搜索">
+              <span data-icon="x"></span>
+            </button>
+            <div class="search-pop" id="search-pop" hidden></div>
+          </form>
+        </div>
+
+        <div class="tb-right">
+          <button class="icon-btn" id="theme-toggle" title="切换主题" aria-label="切换主题">
+            <span data-icon="sun"></span>
+          </button>
+          <div class="account-wrap">
+            <button class="account-btn" id="account-btn" title="账号" aria-label="账号">
+              <span class="account-avatar" id="account-avatar">
+                <span data-icon="user"></span>
+              </span>
+              <span class="account-name" id="account-name">登录</span>
+            </button>
+            <div class="account-menu" id="account-menu" hidden></div>
+          </div>
+          <div class="window-controls" id="window-controls">
+            <button class="win-btn" data-win="minimize" title="最小化" aria-label="最小化">
+              <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6h8" stroke="currentColor" stroke-width="1" /></svg>
+            </button>
+            <button class="win-btn" data-win="maximize" title="最大化" aria-label="最大化">
+              <svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1" /></svg>
+            </button>
+            <button class="win-btn win-close" data-win="close" title="关闭" aria-label="关闭">
+              <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m2.5 2.5 7 7m0-7-7 7" stroke="currentColor" stroke-width="1" /></svg>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div class="shell">
+        <aside class="sidebar" id="sidebar">
+          <nav class="nav" aria-label="主导航">
+            <div class="nav-section">发现</div>
+            <a class="nav-item" href="#/home" data-nav="home">
+              <span class="nav-icon" data-icon="home"></span><span class="nav-label">首页</span>
+            </a>
+            <a class="nav-item" href="#/search" data-nav="search">
+              <span class="nav-icon" data-icon="search"></span><span class="nav-label">搜索</span>
+            </a>
+            <a class="nav-item" href="#/bangumi" data-nav="bangumi">
+              <span class="nav-icon" data-icon="tv"></span><span class="nav-label">番剧</span>
+            </a>
+
+            <div class="nav-section">我的</div>
+            <a class="nav-item" href="#/history" data-nav="history">
+              <span class="nav-icon" data-icon="history"></span><span class="nav-label">历史记录</span>
+            </a>
+            <a class="nav-item" href="#/favorites" data-nav="favorites">
+              <span class="nav-icon" data-icon="star"></span><span class="nav-label">收藏夹</span>
+            </a>
+            <a class="nav-item" href="#/watchlater" data-nav="watchlater">
+              <span class="nav-icon" data-icon="clock"></span><span class="nav-label">稍后再看</span>
+            </a>
+
+            <div class="nav-spacer"></div>
+            <a class="nav-item" href="#/settings" data-nav="settings">
+              <span class="nav-icon" data-icon="settings"></span><span class="nav-label">设置</span>
+            </a>
+          </nav>
+          <div class="sidebar-account" id="sidebar-account"></div>
+        </aside>
+        <div class="sidebar-backdrop" id="sidebar-backdrop" hidden></div>
+
+        <main class="main" id="main" tabindex="-1">
+          <div class="page" id="page"></div>
+        </main>
+      </div>
+    </div>
+
+    <div id="modal-root"></div>
+    <div id="toast-root" class="toast-root" aria-live="polite"></div>
+
+    <div class="boot" id="boot">
+      <span class="brand-mark boot-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M8 4 5.5 1.8M16 4l2.5-2.2" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          <rect x="2.5" y="5.5" width="19" height="14.5" rx="4" fill="currentColor" />
+          <path d="M10 9.6v6.2l5.2-3.1L10 9.6Z" fill="#fff" />
+        </svg>
+      </span>
+      <div class="boot-title">Bilibili-Tauri</div>
+      <div class="boot-tip"><span class="spinner"></span> 正在连接哔哩哔哩…</div>
+    </div>
+
+    <script type="module" src="./js/main.js"></script>
+  </body>
+</html>

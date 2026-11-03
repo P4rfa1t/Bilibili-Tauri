@@ -1,0 +1,128 @@
+# Bilibili-Tauri
+
+一个基于 **Tauri 2 + Rust + WebView2** 的轻量级哔哩哔哩桌面客户端。前端使用原生 ES Modules，没有打包步骤、没有前端框架运行时，安装包和内存占用都远小于 Electron 方案。
+
+![界面预览](assets/screenshot.png)
+
+> 本项目为第三方非官方客户端，与哔哩哔哩官方无关。所有视频、番剧、弹幕与评论内容的版权归原作者及平台所有，仅供学习与交流使用。
+
+## 功能
+
+- **发现**：热门视频、全站/分区排行榜、分区精选，支持无限滚动。
+- **搜索**：视频、UP 主、番剧搜索；WBI 签名；搜索建议、热门搜索、最近搜索、排序切换。
+- **视频**：DASH 播放、分 P 切换、清晰度/倍速/音量/全屏、字幕、画质与进度记忆。
+- **弹幕**：Canvas 弹幕渲染，支持显示开关、透明度、字号、速度、显示区域调整。
+- **评论**：最热/最新排序、分页加载、评论图片查看。
+- **番剧**：番剧/国创/电影/纪录片/综艺分类，详情、选季、选集、自动连播。
+- **互动**：点赞、投币、收藏夹管理（含新建收藏夹）、稍后再看、分享、关注 UP 主。
+- **账号**：二维码扫码登录，Cookie 持久化到应用数据目录，启动时自动恢复登录状态。
+- **我的**：观看历史（按天分组、续播进度）、收藏夹、稍后再看、用户空间。
+- **设置**：主题（浅色/深色/跟随系统）、默认清晰度、自动播放、记忆进度、默认倍速/音量、弹幕参数、最近搜索与恢复默认。
+- **桌面体验**：无边框窗口、自定义标题栏与窗口控制、可收起侧边栏、快捷键、全局搜索。
+
+## 技术方案
+
+| 层 | 实现 |
+| --- | --- |
+| 桌面壳 | Tauri 2 / WebView2 |
+| 后端 | Rust、reqwest、tokio、axum |
+| 前端 | 原生 HTML / CSS / ES Modules |
+| 媒体 | 本地 `127.0.0.1` HTTP 代理，补 Referer 并转发 Range 请求 |
+| 播放 | DASH 视频流 + 音频流双 `<video>` 元素同步，优先 AVC 编码以兼容 WebView2 |
+| 登录 | 二维码登录，Cookie 保存为 `app_data_dir/cookies.json` |
+
+### 为什么需要本地媒体代理
+
+哔哩哔哩 CDN 会校验 `Referer`，WebView2 直接加载音视频地址通常会返回 403。应用启动时会在本机回环地址上启动一个轻量 HTTP 代理，将播放地址改写为代理地址，由 Rust 端补充请求头并转发 `Range`，从而支持拖动进度条和分片加载。
+
+## 开发
+
+### 环境要求
+
+- Windows 10/11
+- [Node.js](https://nodejs.org/) 18+
+- [Rust](https://www.rust-lang.org/tools/install) stable
+- WebView2 Runtime（Windows 11 自带，Windows 10 通常已随 Edge 安装）
+- Tauri 的 Windows 构建依赖（MSVC 工具链或 GNU 工具链均可）
+
+### 启动
+
+```bash
+npm install
+npm run dev
+```
+
+### 构建安装包
+
+```bash
+npm run build
+```
+
+构建产物位于 `src-tauri/target/release/bundle/`。默认生成 NSIS 安装包。
+
+### 使用 GNU 工具链时
+
+如果使用 `x86_64-pc-windows-gnu` 工具链，`ring` 等 C 依赖在部分 MSYS2 环境下会编译失败。可以改用 LLVM-MinGW 的 GCC/Clang 并在构建前指定 `CC`：
+
+```powershell
+$env:CC = "C:\path\to\llvm-mingw\bin\gcc.exe"
+npm run build
+```
+
+使用 MSVC 工具链则不需要额外设置。
+
+## 项目结构
+
+```text
+.
+├─ src/                      # 前端静态资源（Tauri frontendDist）
+│  ├─ index.html
+│  ├─ styles/
+│  └─ js/
+│     ├─ main.js             # 应用壳：标题栏、侧边栏、搜索、账号菜单
+│     ├─ router.js           # Hash 路由与页面生命周期
+│     ├─ api.js              # Tauri 命令封装
+│     ├─ store.js            # 本地偏好与登录状态
+│     ├─ login.js            # 二维码登录
+│     ├─ pages/              # 首页、搜索、视频、番剧、空间、历史、收藏、稍后再看、设置
+│     ├─ player/             # 播放器与 Canvas 弹幕
+│     └─ ...
+├─ src-tauri/
+│  ├─ src/
+│  │  ├─ api/                # Bilibili API 客户端与数据模型
+│  │  ├─ commands.rs         # Tauri 命令
+│  │  ├─ proxy.rs            # 本地媒体代理
+│  │  └─ lib.rs
+│  ├─ capabilities/
+│  ├─ icons/
+│  └─ tauri.conf.json
+├─ assets/
+├─ package.json
+└─ README.md
+```
+
+## 快捷键
+
+| 快捷键 | 功能 |
+| --- | --- |
+| `Ctrl + K` | 聚焦全局搜索 |
+| `Alt + ←` / `Alt + →` | 后退 / 前进 |
+| `空格` / `K` | 播放 / 暂停 |
+| `←` / `→` | 快退 / 快进 5 秒 |
+| `J` / `L` | 快退 / 快进 10 秒 |
+| `↑` / `↓` | 调节音量 |
+| `M` | 静音 |
+| `F` | 全屏 |
+| `D` | 弹幕开关 |
+| `C` | 字幕开关 |
+
+## 已知限制
+
+- 未登录时清晰度通常最高为 480P，登录后可解锁更高清晰度（取决于账号与视频本身）。
+- 部分版权内容、付费内容或地区限制内容无法播放。
+- 弹幕仅支持滚动弹幕的基础渲染，未实现完整的高级弹幕样式。
+- 本项目依赖哔哩哔哩非公开接口，接口变更可能导致部分功能失效。
+
+## License
+
+[MIT](LICENSE)
