@@ -266,13 +266,33 @@ impl BilibiliClient {
         resp.text().await.map_err(|e| e.to_string())
     }
 
-    async fn get_json_url(&self, url: &str, login: &Cookies, referer: &str) -> Result<Value, String> {
+    async fn get_json_url_at(
+        &self,
+        url: &str,
+        login: &Cookies,
+        referer: &str,
+        origin: &str,
+    ) -> Result<Value, String> {
         let cookie = Self::cookie_header(&self.merged(login));
-        let mut req = self.http.get(url).header("referer", referer);
+        let mut req = self
+            .http
+            .get(url)
+            .header("referer", referer)
+            .header("origin", origin);
         if !cookie.is_empty() {
             req = req.header("cookie", cookie);
         }
         self.finish(req).await
+    }
+
+    async fn get_json_url(
+        &self,
+        url: &str,
+        login: &Cookies,
+        referer: &str,
+    ) -> Result<Value, String> {
+        self.get_json_url_at(url, login, referer, "https://www.bilibili.com")
+            .await
     }
 
     // ---------- 匿名 cookie / 风控前置 ----------
@@ -949,13 +969,17 @@ impl BilibiliClient {
     }
 
     pub async fn qr_generate(&self) -> Result<QrCode, String> {
-        let d = self
-            .api_get(
-                "/x/passport-login/web/qrcode/generate",
-                &[],
+        // 二维码接口挂在 passport 域，不能复用 api.bilibili.com。
+        let url = format!("{PASSPORT}/x/passport-login/web/qrcode/generate");
+        let v = self
+            .get_json_url_at(
+                &url,
                 &Cookies::new(),
+                "https://passport.bilibili.com/",
+                "https://passport.bilibili.com",
             )
             .await?;
+        let d = check(&v)?;
         let url = text_of(&d["url"]);
         let key = text_of(&d["qrcode_key"]);
         if url.is_empty() || key.is_empty() {
@@ -969,14 +993,19 @@ impl BilibiliClient {
 
     pub async fn qr_poll(&self, key: &str) -> Result<QrPoll, String> {
         let url = format!("{PASSPORT}/x/passport-login/web/qrcode/poll");
-        let resp = self
+        let cookie = Self::cookie_header(&self.merged(&Cookies::new()));
+        let mut req = self
             .http
             .get(url)
             .query(&[("qrcode_key", key)])
             .header("referer", "https://passport.bilibili.com/")
-            .send()
-            .await
-            .map_err(|e| e.to_string())?;
+            .header("origin", "https://passport.bilibili.com");
+        if !cookie.is_empty() {
+            req = req.header("cookie", cookie);
+        }
+        let resp = req.send().await.map_err(|e| e.to_string())?;
+        self.absorb(&resp);
+        let http_status = resp.status();
         let mut cookies = Cookies::new();
         for sc in resp.headers().get_all(reqwest::header::SET_COOKIE) {
             let Ok(s) = sc.to_str() else { continue };
@@ -985,8 +1014,12 @@ impl BilibiliClient {
                 cookies.insert(k.trim().to_string(), val.trim().to_string());
             }
         }
-        let v: Value = resp.json().await.map_err(|e| e.to_string())?;
-        let d = &v["data"];
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        if !http_status.is_success() {
+            return Err(format!("HTTP {http_status}: {}", truncate(&body, 200)));
+        }
+        let v: Value = serde_json::from_str(&body).map_err(|e| format!("JSON 解析失败: {e}"))?;
+        let d = check(&v)?;
         let status = num_of(&d["code"]);
         let message = text_of(&d["message"]);
         if status == 0 {
