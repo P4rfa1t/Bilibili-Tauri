@@ -509,6 +509,28 @@
   height: 12px;
 }
 
+/* 推荐理由 / 个性化备注 */
+.video-note {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  color: var(--text-3);
+  font-size: 11px;
+  line-height: 1.4;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.video-note svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  color: var(--brand);
+  opacity: 0.8;
+}
+
 .video-progress {
   position: absolute;
   left: 0;

@@ -286,6 +286,7 @@ export function videoCard(v, options = {}) {
     showDanmaku = true,
     startAt = 0,
     cardClass = "",
+    note = "",
   } = options;
   const bvid = String(v.bvid || "");
   const start = Math.max(0, Math.floor(Number(startAt) || 0));
@@ -338,6 +339,11 @@ export function videoCard(v, options = {}) {
             : ""
         }
       </div>
+      ${
+        note
+          ? `<div class="video-note">${icon("sparkles", 12)}${escapeHtml(note)}</div>`
+          : ""
+      }
     </div>
     ${
       remove

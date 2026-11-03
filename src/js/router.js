@@ -1,9 +1,11 @@
 /** Hash router with per-page cleanup support. */
 
 import * as home from "./pages/home.js";
+import * as recommend from "./pages/recommend.js";
 import * as search from "./pages/search.js";
 import * as video from "./pages/video.js";
 import * as bangumi from "./pages/bangumi.js";
+import * as live from "./pages/live.js";
 import * as space from "./pages/space.js";
 import * as historyPage from "./pages/history.js";
 import * as favorites from "./pages/favorites.js";
@@ -14,9 +16,11 @@ import { errorText } from "./utils.js";
 
 const TITLES = {
   home: "首页",
+  recommend: "推荐",
   search: "搜索",
   video: "视频",
   bangumi: "番剧",
+  live: "直播",
   space: "用户空间",
   history: "历史记录",
   favorites: "收藏夹",
@@ -51,6 +55,9 @@ function resolve(route) {
   if (!first || first === "home") {
     return { name: "home", module: home, params: {}, nav: "home" };
   }
+  if (first === "recommend") {
+    return { name: "recommend", module: recommend, params: {}, nav: "recommend" };
+  }
   if (first === "search") {
     return { name: "search", module: search, params: {}, nav: "search" };
   }
@@ -63,6 +70,14 @@ function resolve(route) {
       module: bangumi,
       params: second ? { seasonId: second } : {},
       nav: "bangumi",
+    };
+  }
+  if (first === "live") {
+    return {
+      name: "live",
+      module: live,
+      params: second ? { roomId: second } : {},
+      nav: "live",
     };
   }
   if (first === "space" && second) {

@@ -17,8 +17,10 @@ import {
   videoSubtitles,
   watchLaterAdd,
 } from "../api.js";
+import { filterRelatedVideos } from "../filters.js";
 import { icon } from "../icons.js";
 import { ensureLogin } from "../login.js";
+import { orderStreams, videoPlayOptions } from "../media.js";
 import { Player } from "../player/player.js";
 import { store } from "../store.js";
 import {
@@ -223,7 +225,9 @@ export async function render(root, ctx) {
   const cid = currentPage.cid || info.cid;
   const owner = info.owner || { mid: 0, name: "未知 UP 主", face: "" };
   const stat = info.stat || {};
-  const related = (info.related || []).filter((item) => item && item.bvid !== bvid).slice(0, 14);
+  const related = filterRelatedVideos(
+    (info.related || []).filter((item) => item && item.bvid !== bvid)
+  ).slice(0, 14);
   const queryStart = Math.max(0, Number(ctx.query.get("t")) || 0);
   const initialStart = queryStart > 0 ? queryStart : 0;
   const description = String(info.desc || "").trim();
@@ -377,8 +381,9 @@ export async function render(root, ctx) {
     const token = ++streamToken;
     player.showLoading();
     try {
-      const play = await playInfo(bvid, cid, store.get("quality"));
+      const play = await playInfo(bvid, cid, store.get("quality"), videoPlayOptions());
       if (disposed || token !== streamToken) return;
+      play.streams = orderStreams(play.streams);
       const resume = initialStart > 0 ? initialStart : store.get("resume") ? resumeSeconds(play) : 0;
       const ok = player.setSource(play, {
         title: info.title,

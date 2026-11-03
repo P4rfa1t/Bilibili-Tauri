@@ -40,6 +40,18 @@ pub async fn home_feed(
 }
 
 #[tauri::command]
+pub async fn recommend_feed(
+    state: State<'_, AppState>,
+    fresh_idx: Option<u32>,
+) -> Result<PageResult<VideoCard>, String> {
+    let login = login_of(&state);
+    state
+        .client
+        .recommend(fresh_idx.unwrap_or(1), &login)
+        .await
+}
+
+#[tauri::command]
 pub async fn search(
     state: State<'_, AppState>,
     keyword: String,
@@ -92,11 +104,22 @@ pub async fn play_info(
     bvid: String,
     cid: i64,
     qn: Option<i32>,
+    audio_qn: Option<i32>,
+    codec: Option<String>,
+    try_look: Option<bool>,
 ) -> Result<PlayInfo, String> {
     let login = login_of(&state);
     let mut info = state
         .client
-        .play_info(&bvid, cid, qn.unwrap_or(80), &login)
+        .play_info(
+            &bvid,
+            cid,
+            qn.unwrap_or(80),
+            audio_qn.unwrap_or(0),
+            codec.as_deref().unwrap_or("auto"),
+            try_look.unwrap_or(false),
+            &login,
+        )
         .await?;
     state.proxy.map_play_info(&mut info);
     Ok(info)
@@ -108,11 +131,20 @@ pub async fn pgc_play_info(
     ep: i64,
     cid: i64,
     qn: Option<i32>,
+    audio_qn: Option<i32>,
+    codec: Option<String>,
 ) -> Result<PlayInfo, String> {
     let login = login_of(&state);
     let mut info = state
         .client
-        .pgc_play_info(ep, cid, qn.unwrap_or(80), &login)
+        .pgc_play_info(
+            ep,
+            cid,
+            qn.unwrap_or(80),
+            audio_qn.unwrap_or(0),
+            codec.as_deref().unwrap_or("auto"),
+            &login,
+        )
         .await?;
     state.proxy.map_play_info(&mut info);
     Ok(info)
@@ -381,6 +413,58 @@ pub async fn bangumi_detail(
 ) -> Result<BangumiDetail, String> {
     let login = login_of(&state);
     state.client.bangumi_detail(season_id, &login).await
+}
+
+// ---------------- 直播 ----------------
+
+#[tauri::command]
+pub async fn live_feed(state: State<'_, AppState>) -> Result<LiveFeed, String> {
+    let login = login_of(&state);
+    state.client.live_feed(&login).await
+}
+
+#[tauri::command]
+pub async fn live_areas(state: State<'_, AppState>) -> Result<Vec<LiveAreaGroup>, String> {
+    let login = login_of(&state);
+    state.client.live_areas(&login).await
+}
+
+#[tauri::command]
+pub async fn live_rooms(
+    state: State<'_, AppState>,
+    area_id: i64,
+    area_name: String,
+    page: Option<u32>,
+) -> Result<PageResult<LiveRoom>, String> {
+    let login = login_of(&state);
+    state
+        .client
+        .live_rooms(area_id, &area_name, page.unwrap_or(1), &login)
+        .await
+}
+
+#[tauri::command]
+pub async fn live_room_detail(
+    state: State<'_, AppState>,
+    room_id: i64,
+) -> Result<LiveRoomDetail, String> {
+    let login = login_of(&state);
+    state.client.live_room_detail(room_id, &login).await
+}
+
+#[tauri::command]
+pub async fn live_play_info(
+    state: State<'_, AppState>,
+    room_id: i64,
+    qn: Option<i32>,
+) -> Result<LivePlayInfo, String> {
+    let login = login_of(&state);
+    let mut info = state
+        .client
+        .live_play_info(room_id, qn.unwrap_or(0), &login)
+        .await?;
+    state.proxy.map_live_play_info(&mut info);
+    Ok(info)
 }
 
 // ---------------- 其他 ----------------

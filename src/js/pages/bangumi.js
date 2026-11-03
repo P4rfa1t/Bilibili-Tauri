@@ -7,6 +7,7 @@ import {
 } from "../api.js";
 import { BANGUMI_TYPES } from "../constants.js";
 import { icon } from "../icons.js";
+import { orderStreams, pgcPlayOptions } from "../media.js";
 import { Player } from "../player/player.js";
 import { store } from "../store.js";
 import {
@@ -338,8 +339,14 @@ async function renderDetail(root, ctx, seasonId) {
 
     const token = ++episodeToken;
     try {
-      const play = await pgcPlayInfo(episode.ep_id, episode.cid, store.get("quality"));
+      const play = await pgcPlayInfo(
+        episode.ep_id,
+        episode.cid,
+        store.get("quality"),
+        pgcPlayOptions()
+      );
       if (disposed || token !== episodeToken) return;
+      play.streams = orderStreams(play.streams);
       const resume = store.get("resume") ? resumeSeconds(play) : 0;
       const ok = player.setSource(play, {
         title: label,

@@ -1,5 +1,13 @@
 import { appVersion, openExternal } from "../api.js";
-import { QUALITY_OPTIONS, SPEED_OPTIONS, THEME_OPTIONS } from "../constants.js";
+import {
+  AUDIO_QUALITY_OPTIONS,
+  CDN_OPTIONS,
+  CODEC_OPTIONS,
+  LIVE_QUALITY_OPTIONS,
+  QUALITY_OPTIONS,
+  SPEED_OPTIONS,
+  THEME_OPTIONS,
+} from "../constants.js";
 import { icon } from "../icons.js";
 import { logoutUser, openLoginModal, refreshUser } from "../login.js";
 import { store } from "../store.js";
@@ -10,7 +18,7 @@ import {
   setButtonLoading,
   toast,
 } from "../ui.js";
-import { errorText, escapeHtml } from "../utils.js";
+import { errorText, escapeAttr, escapeHtml } from "../utils.js";
 
 const REPO_URL = "https://github.com/P4rfa1t/Bilibili-Tauri";
 const BILIBILI_URL = "https://www.bilibili.com";
@@ -93,6 +101,10 @@ function rangeRow(label, desc, setting, value, { min, max, step = 1, scale = 1, 
       ? `${Math.round(Number(value) * 100)}%`
       : format === "px"
       ? `${Math.round(Number(value))}px`
+      : format === "plain"
+      ? `${Number(value)}`
+      : format === "minute"
+      ? `${Math.round(Number(value) / 60)} 分钟`
       : `${Number(value)}x`;
   return `<div class="set-row">
     <div class="set-label"><div class="t">${escapeHtml(label)}</div><div class="d">${escapeHtml(
@@ -102,6 +114,53 @@ function rangeRow(label, desc, setting, value, { min, max, step = 1, scale = 1, 
       <input class="range" type="range" min="${min}" max="${max}" step="${step}"
         value="${shown}" data-setting="${setting}" data-scale="${scale}" data-format="${format}">
       <span class="range-value" data-range-value>${text}</span>
+    </div>
+  </div>`;
+}
+
+function numberRow(
+  label,
+  desc,
+  setting,
+  value,
+  { min = 0, max = 1000, step = 1, scale = 1, unit = "" } = {}
+) {
+  const shown = Math.round(Number(value) * Number(scale) * 100) / 100;
+  return `<div class="set-row">
+    <div class="set-label"><div class="t">${escapeHtml(label)}</div><div class="d">${escapeHtml(
+    desc
+  )}</div></div>
+    <div class="set-control">
+      <input class="input input-sm num-input" type="number" min="${min}" max="${max}" step="${step}"
+        value="${shown}" data-setting="${setting}" data-scale="${scale}">
+      ${unit ? `<span class="range-value">${escapeHtml(unit)}</span>` : ""}
+    </div>
+  </div>`;
+}
+
+function kwChipHtml(setting, word) {
+  return `<span class="kw-chip">${escapeHtml(word)}<button type="button" class="kw-remove"
+    data-kw-remove="${setting}" data-kw-word="${escapeAttr(word)}"
+    aria-label="删除 ${escapeAttr(word)}">${icon("x", 12)}</button></span>`;
+}
+
+function kwListHtml(setting) {
+  const words = store.get(setting) || [];
+  if (!words.length) return '<span class="kw-empty">尚未添加</span>';
+  return words.map((word) => kwChipHtml(setting, word)).join("");
+}
+
+function keywordEditor(label, desc, setting) {
+  return `<div class="set-row">
+    <div class="set-label"><div class="t">${escapeHtml(label)}</div><div class="d">${escapeHtml(
+    desc
+  )}</div></div>
+    <div class="set-control kw-control">
+      <div class="kw-list" data-kw-list="${setting}">${kwListHtml(setting)}</div>
+      <div class="kw-input-row">
+        <input class="input input-sm" type="text" placeholder="输入后回车添加" data-kw-input="${setting}">
+        <button class="btn btn-sm btn-soft" type="button" data-kw-add="${setting}">添加</button>
+      </div>
     </div>
   </div>`;
 }
@@ -127,6 +186,19 @@ export async function render(root, ctx) {
   const speedOptions = SPEED_OPTIONS.map((value) => ({
     value,
     label: `${value}x`,
+  }));
+  const audioOptions = AUDIO_QUALITY_OPTIONS.map((item) => ({
+    value: item.value,
+    label: item.label,
+  }));
+  const codecOptions = CODEC_OPTIONS.map((item) => ({
+    value: item.value,
+    label: item.label,
+  }));
+  const cdnOptions = CDN_OPTIONS.map((item) => ({ value: item.value, label: item.label }));
+  const liveQualityOptions = LIVE_QUALITY_OPTIONS.map((item) => ({
+    value: item.value,
+    label: item.label,
   }));
   const user = store.user;
 
@@ -243,6 +315,126 @@ export async function render(root, ctx) {
     </section>
 
     <section class="settings-card">
+      <div class="settings-card-head">${icon("compass", 18)}推荐流</div>
+      <div class="settings-card-sub">推荐内容来自哔哩哔哩官方首页推荐接口，过滤规则只影响本地显示。</div>
+      ${switchRow(
+        "继续上次刷新批次",
+        "重新打开应用时从上次的推荐批次继续，而不是从头刷新。",
+        "recommendKeepRefresh",
+        store.get("recommendKeepRefresh")
+      )}
+      ${switchRow(
+        "标记上次浏览位置",
+        "在推荐流里显示“上次看到这里”的分隔线。",
+        "recommendLastSeen",
+        store.get("recommendLastSeen")
+      )}
+      ${switchRow(
+        "关注 UP 主豁免",
+        "过滤时跳过已关注的 UP 主，避免把常看的内容滤掉。",
+        "exemptFollowed",
+        store.get("exemptFollowed")
+      )}
+      ${switchRow(
+        "同时过滤相关推荐",
+        "视频页右侧的相关推荐也套用同一套过滤规则。",
+        "filterRelated",
+        store.get("filterRelated")
+      )}
+      ${rangeRow("最低点赞率", "点赞数与播放量的比值低于该值时隐藏。", "likeRateMin", store.get("likeRateMin"), {
+        min: 0,
+        max: 20,
+        step: 0.5,
+        scale: 100,
+        format: "percent",
+      })}
+      ${numberRow("最低播放量", "播放量低于该值时隐藏，0 表示不限。", "playMin", store.get("playMin"), {
+        min: 0,
+        max: 100000000,
+        step: 1000,
+        unit: "次",
+      })}
+      ${numberRow("最短时长", "时长低于该值时隐藏，0 表示不限。", "durationMin", store.get("durationMin"), {
+        min: 0,
+        max: 120,
+        step: 1,
+        scale: 1 / 60,
+        unit: "分钟",
+      })}
+      ${numberRow("最长时长", "时长高于该值时隐藏，0 表示不限。", "durationMax", store.get("durationMax"), {
+        min: 0,
+        max: 120,
+        step: 1,
+        scale: 1 / 60,
+        unit: "分钟",
+      })}
+      ${keywordEditor("标题关键词", "标题命中任一关键词时隐藏，回车或逗号分隔。", "titleFilters")}
+      ${keywordEditor("分区关键词", "分区或标签命中任一关键词时隐藏。", "partitionFilters")}
+    </section>
+
+    <section class="settings-card">
+      <div class="settings-card-head">${icon("play-circle", 18)}音视频</div>
+      <div class="settings-card-sub">影响取流参数；目标档位不可用时会自动回退到可用的最高档。</div>
+      ${switchRow(
+        "免登录尝试 1080P",
+        "未登录时也请求 1080P，取不到就自动降级。",
+        "noLogin1080",
+        store.get("noLogin1080")
+      )}
+      ${selectRow(
+        "音质偏好",
+        "DASH 音轨的码率档位，源视频没有对应档位时降级。",
+        "audioQuality",
+        audioOptions,
+        store.get("audioQuality")
+      )}
+      ${selectRow(
+        "视频编码偏好",
+        "自动模式按 WebView2 的兼容性排序选择。",
+        "codecPreference",
+        codecOptions,
+        store.get("codecPreference"),
+        false
+      )}
+      ${selectRow(
+        "CDN 线路",
+        "备用线路优先时改用视频的备用地址，主线路慢可以切换。",
+        "cdnPreference",
+        cdnOptions,
+        store.get("cdnPreference"),
+        false
+      )}
+      ${selectRow(
+        "直播清晰度",
+        "匿名状态通常最高只能到超清档位。",
+        "liveQuality",
+        liveQualityOptions,
+        store.get("liveQuality")
+      )}
+      ${selectRow(
+        "直播线路",
+        "备用线路优先时在主线路之前尝试备用地址。",
+        "liveCdnPreference",
+        cdnOptions,
+        store.get("liveCdnPreference"),
+        false
+      )}
+      ${rangeRow("直播缓冲", "缓冲越大越抗抖，起播时间也会变长。", "liveBufferSize", store.get("liveBufferSize"), {
+        min: 1,
+        max: 16,
+        step: 1,
+        format: "plain",
+      })}
+      ${rangeRow("低延迟追帧", "秒。越小越贴近直播，网络差时更容易卡顿。", "liveLatency", store.get("liveLatency"), {
+        min: 1,
+        max: 12,
+        step: 1,
+        format: "plain",
+      })}
+      <p class="hint">硬件解码、音画同步与画中画由 WebView2 直接处理，这里不另设开关。</p>
+    </section>
+
+    <section class="settings-card">
       <div class="settings-card-head">${icon("database", 18)}数据与隐私</div>
       <div class="settings-card-sub">清除只会影响本地数据，不会删除 B 站账号内容。</div>
       <div class="set-row">
@@ -254,7 +446,7 @@ export async function render(root, ctx) {
         </div>
       </div>
       <div class="set-row">
-        <div class="set-label"><div class="t">恢复默认设置</div><div class="d">主题、播放、弹幕和侧边栏偏好都会恢复默认值。</div></div>
+        <div class="set-label"><div class="t">恢复默认设置</div><div class="d">主题、播放、弹幕、推荐流与音视频偏好都会恢复默认值。</div></div>
         <div class="set-control">
           <button class="btn btn-sm btn-danger-soft" type="button" data-reset>恢复默认</button>
         </div>
@@ -327,6 +519,7 @@ export async function render(root, ctx) {
     const format = input.dataset.format;
     if (format === "percent") return `${Math.round(raw * 100)}%`;
     if (format === "px") return `${Math.round(raw)}px`;
+    if (format === "plain") return `${Math.round(raw * 100) / 100}`;
     return `${raw}x`;
   };
 
@@ -341,6 +534,9 @@ export async function render(root, ctx) {
         input.value = String(scale === 100 ? Math.round(Number(value) * 100) : value);
         const label = input.nextElementSibling;
         if (label?.hasAttribute("data-range-value")) label.textContent = rangeLabel(input);
+      } else if (input.type === "number") {
+        const scale = Number(input.dataset.scale) || 1;
+        input.value = String(Math.round(Number(value) * scale * 100) / 100);
       } else {
         input.value = String(value);
       }
@@ -369,6 +565,11 @@ export async function render(root, ctx) {
     } else if (input.type === "range") {
       const scale = Number(input.dataset.scale) || 1;
       value = Number(input.value) / scale;
+    } else if (input.type === "number") {
+      const scale = Number(input.dataset.scale) || 1;
+      const raw = Number(input.value);
+      if (!Number.isFinite(raw)) return;
+      value = scale === 1 ? raw : raw / scale;
     } else if (input.dataset.number === "true") {
       value = Number(input.value);
     } else {
@@ -381,6 +582,51 @@ export async function render(root, ctx) {
     const button = event.target.closest("[data-theme-value]");
     if (!button) return;
     store.set("theme", button.dataset.themeValue);
+  });
+
+  const refreshKeywordList = (setting) => {
+    const list = root.querySelector(`[data-kw-list="${setting}"]`);
+    if (list) list.innerHTML = kwListHtml(setting);
+  };
+
+  const addKeywords = (setting) => {
+    const input = root.querySelector(`[data-kw-input="${setting}"]`);
+    const raw = String(input?.value || "").trim();
+    if (!raw) return;
+    const words = raw.split(/[,，;；\s]+/).filter(Boolean);
+    const list = [...(store.get(setting) || [])];
+    words.forEach((word) => {
+      if (!list.includes(word)) list.push(word);
+    });
+    store.set(setting, list.slice(0, 30));
+    if (input) input.value = "";
+    refreshKeywordList(setting);
+  };
+
+  root.addEventListener("keydown", (event) => {
+    const input = event.target.closest("[data-kw-input]");
+    if (!input) return;
+    if (event.key === "Enter" || event.key === "," || event.key === "，") {
+      event.preventDefault();
+      addKeywords(input.dataset.kwInput);
+    }
+  });
+
+  root.addEventListener("click", (event) => {
+    const add = event.target.closest("[data-kw-add]");
+    if (add) {
+      addKeywords(add.dataset.kwAdd);
+      return;
+    }
+    const remove = event.target.closest("[data-kw-remove]");
+    if (!remove) return;
+    const setting = remove.dataset.kwRemove;
+    const word = remove.dataset.kwWord;
+    store.set(
+      setting,
+      (store.get(setting) || []).filter((item) => item !== word)
+    );
+    refreshKeywordList(setting);
   });
 
   root.querySelector("[data-login]")?.addEventListener("click", () => openLoginModal());
@@ -424,7 +670,7 @@ export async function render(root, ctx) {
   root.querySelector("[data-reset]")?.addEventListener("click", async () => {
     const ok = await confirmDialog({
       title: "恢复默认设置",
-      message: "主题、播放、弹幕、音量与侧边栏偏好都会恢复默认，确定继续吗？",
+      message: "主题、播放、弹幕、音量、推荐流与音视频偏好都会恢复默认，确定继续吗？",
       okText: "恢复默认",
       danger: true,
     });

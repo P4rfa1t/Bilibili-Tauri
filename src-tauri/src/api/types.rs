@@ -20,10 +20,17 @@ pub struct VideoCard {
     pub mid: i64,
     pub play: i64,
     pub danmaku: i64,
+    pub like: i64,
+    /// 视频分区名（部分接口返回）
+    pub tname: String,
+    /// 官方推荐接口标记的“已关注 UP 主”
+    pub is_followed: bool,
     /// 已格式化的时长，如 12:34 / 1:02:03
     pub duration: String,
     pub pubdate: i64,
     pub description: String,
+    /// 推荐理由（仅官方推荐接口返回，例如“15万点赞”）
+    pub recommend_reason: String,
 }
 
 /// 用户卡片（搜索结果）
@@ -348,4 +355,101 @@ pub struct InteractionState {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SearchSuggest {
     pub values: Vec<String>,
+}
+
+// ---------------- 直播 ----------------
+
+/// 直播房间卡片
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LiveRoom {
+    pub room_id: i64,
+    pub uid: i64,
+    pub title: String,
+    pub cover: String,
+    pub uname: String,
+    pub face: String,
+    pub online: i64,
+    pub area_id: i64,
+    pub area_name: String,
+    pub parent_area_id: i64,
+    pub parent_area_name: String,
+    pub live_status: i32,
+}
+
+/// 直播首页的一个分区模块
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LiveModule {
+    pub id: i64,
+    pub title: String,
+    pub link: String,
+    pub cover: String,
+    pub rooms: Vec<LiveRoom>,
+}
+
+/// 直播首页聚合数据
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LiveFeed {
+    pub recommend: Vec<LiveRoom>,
+    pub modules: Vec<LiveModule>,
+}
+
+/// 直播子分区
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LiveArea {
+    pub id: i64,
+    pub name: String,
+    pub parent_id: i64,
+    pub pic: String,
+    pub hot: bool,
+}
+
+/// 直播父分区
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LiveAreaGroup {
+    pub id: i64,
+    pub name: String,
+    pub areas: Vec<LiveArea>,
+}
+
+/// 直播间详情
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LiveRoomDetail {
+    pub room_id: i64,
+    pub uid: i64,
+    pub title: String,
+    pub cover: String,
+    pub keyframe: String,
+    pub description: String,
+    pub uname: String,
+    pub face: String,
+    pub online: i64,
+    pub attention: i64,
+    pub live_status: i32,
+    pub area_id: i64,
+    pub area_name: String,
+    pub parent_area_id: i64,
+    pub parent_area_name: String,
+    pub live_time: String,
+    pub tags: Vec<String>,
+}
+
+/// 直播清晰度
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LiveQuality {
+    pub qn: i32,
+    pub desc: String,
+}
+
+/// 直播播放地址（FLV + mpegts.js）
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LivePlayInfo {
+    pub room_id: i64,
+    pub live_status: i32,
+    pub url: String,
+    pub backup_urls: Vec<String>,
+    pub format: String,
+    pub quality: i32,
+    pub quality_desc: String,
+    pub qualities: Vec<LiveQuality>,
+    pub accept_qn: Vec<i32>,
 }

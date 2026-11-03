@@ -12,6 +12,7 @@ use super::types::*;
 const API: &str = "https://api.bilibili.com";
 const APP: &str = "https://app.bilibili.com";
 const PASSPORT: &str = "https://passport.bilibili.com";
+const LIVE_API: &str = "https://api.live.bilibili.com";
 const SEARCH: &str = "https://search.bilibili.com";
 const SPACE: &str = "https://space.bilibili.com";
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
@@ -475,6 +476,71 @@ impl BilibiliClient {
         })
     }
 
+    /// 官方首页推荐流。
+    ///
+    /// 与热门不同，推荐接口会结合登录 Cookie 给出更贴近个人偏好的内容；
+    /// 匿名状态下也能返回官方推荐。`fresh_idx` 递增即可获得下一批内容。
+    pub async fn recommend(
+        &self,
+        fresh_idx: u32,
+        login: &Cookies,
+    ) -> Result<PageResult<VideoCard>, String> {
+        self.ensure_buvid(login).await;
+        let idx = fresh_idx.max(1);
+        let params = [
+            ("ps", "24".to_string()),
+            ("fresh_type", "3".to_string()),
+            ("feed_version", "V8".to_string()),
+            ("fresh_idx", idx.to_string()),
+            ("fresh_idx_1h", idx.to_string()),
+            ("brush", idx.saturating_sub(1).to_string()),
+            ("homepage_ver", "1".to_string()),
+            ("screen", "1920-1080".to_string()),
+            ("web_location", "1430654".to_string()),
+        ];
+        match self
+            .api_get("/x/web-interface/index/top/feed/rcmd", &params, login)
+            .await
+        {
+            Ok(d) => {
+                let mut items = Vec::new();
+                if let Some(arr) = d["item"].as_array() {
+                    for item in arr {
+                        if item["goto"].as_str() != Some("av") {
+                            continue;
+                        }
+                        let Some(mut card) = parse_video_card(item) else {
+                            continue;
+                        };
+                        if card.aid <= 0 {
+                            card.aid = num_of(&item["id"]);
+                        }
+                        if card.recommend_reason.is_empty() {
+                            card.recommend_reason =
+                                plain_text(&text_of(&item["rcmd_reason"]["content"]));
+                        }
+                        items.push(card);
+                    }
+                }
+                if items.is_empty() {
+                    return Err("暂时没有获取到推荐内容，请稍后重试".into());
+                }
+                Ok(PageResult {
+                    items,
+                    page: idx,
+                    has_more: idx < 60,
+                    total: 0,
+                })
+            }
+            Err(error) => {
+                // 推荐接口偶发风控时退回热门，保证页面仍可浏览
+                let mut fallback = self.popular(1, login).await.map_err(|_| error)?;
+                fallback.page = idx;
+                Ok(fallback)
+            }
+        }
+    }
+
     /// 排行榜
     pub async fn ranking(&self, rid: i64, login: &Cookies) -> Result<PageResult<VideoCard>, String> {
         let d = self
@@ -762,6 +828,9 @@ impl BilibiliClient {
         bvid: &str,
         cid: i64,
         qn: i32,
+        audio_qn: i32,
+        codec: &str,
+        try_look: bool,
         login: &Cookies,
     ) -> Result<PlayInfo, String> {
         self.ensure_buvid(login).await;
@@ -773,6 +842,10 @@ impl BilibiliClient {
         params.insert("fourk".into(), "1".into());
         params.insert("platform".into(), "pc".into());
         params.insert("high_quality".into(), "1".into());
+        if try_look {
+            // 匿名状态下开启“免登录 1080P”
+            params.insert("try_look".into(), "1".into());
+        }
         let referer = format!("https://www.bilibili.com/video/{bvid}");
         let res = self
             .wbi_get_at(
@@ -786,25 +859,25 @@ impl BilibiliClient {
         let d = match res {
             Ok(v) => v,
             Err(e) => {
+                let mut fallback_params = vec![
+                    ("bvid", bvid.to_string()),
+                    ("cid", cid.to_string()),
+                    ("qn", qn.to_string()),
+                    ("fnval", "4048".into()),
+                    ("fourk", "1".into()),
+                    ("platform", "pc".into()),
+                    ("high_quality", "1".into()),
+                ];
+                if try_look {
+                    fallback_params.push(("try_look", "1".into()));
+                }
                 let fallback = self
-                    .api_get(
-                        "/x/player/playurl",
-                        &[
-                            ("bvid", bvid.to_string()),
-                            ("cid", cid.to_string()),
-                            ("qn", qn.to_string()),
-                            ("fnval", "4048".into()),
-                            ("fourk", "1".into()),
-                            ("platform", "pc".into()),
-                            ("high_quality", "1".into()),
-                        ],
-                        login,
-                    )
+                    .api_get("/x/player/playurl", &fallback_params, login)
                     .await;
                 fallback.map_err(|_| e)?
             }
         };
-        build_play_info(&d, false)
+        build_play_info(&d, false, audio_qn, codec)
     }
 
     /// 番剧 / 影视播放地址
@@ -813,6 +886,8 @@ impl BilibiliClient {
         ep_id: i64,
         cid: i64,
         qn: i32,
+        audio_qn: i32,
+        codec: &str,
         login: &Cookies,
     ) -> Result<PlayInfo, String> {
         let referer = format!("https://www.bilibili.com/bangumi/play/ep{ep_id}");
@@ -844,7 +919,7 @@ impl BilibiliClient {
         if d.is_null() {
             return Err("未获取到番剧播放信息（可能受地区或版权限制）".into());
         }
-        build_play_info(&d, true)
+        build_play_info(&d, true, audio_qn, codec)
     }
 
     pub async fn danmaku(&self, cid: i64, login: &Cookies) -> Result<Vec<DanmakuItem>, String> {
@@ -1740,11 +1815,409 @@ impl BilibiliClient {
             seasons,
         })
     }
+
+    // ---------- 直播 ----------
+
+    /// 直播首页：推荐房间 + 各内容分区模块
+    pub async fn live_feed(&self, login: &Cookies) -> Result<LiveFeed, String> {
+        let main_url = format!("{LIVE_API}/xlive/web-interface/v1/index/getList?platform=web");
+        let more_url =
+            format!("{LIVE_API}/xlive/web-interface/v1/webMain/getMoreRecList?platform=web");
+        let (main, more) = tokio::join!(
+            self.get_json_url_at(
+                &main_url,
+                login,
+                "https://live.bilibili.com/",
+                "https://live.bilibili.com",
+            ),
+            self.get_json_url_at(
+                &more_url,
+                login,
+                "https://live.bilibili.com/",
+                "https://live.bilibili.com",
+            )
+        );
+        let d = check(&main?)?;
+
+        let mut recommend = parse_live_rooms(&d["recommend_room_list"]);
+        if let Ok(v) = more {
+            if let Ok(m) = check(&v) {
+                merge_live_rooms(&mut recommend, parse_live_rooms(&m["recommend_room_list"]));
+            }
+        }
+
+        let mut modules = Vec::new();
+        if let Some(arr) = d["room_list"].as_array() {
+            for m in arr {
+                let id = num_of(&m["module_info"]["id"]);
+                // 模块 3 是“推荐直播”，与顶部推荐重复
+                if id == 3 {
+                    continue;
+                }
+                let rooms = parse_live_rooms(&m["list"]);
+                if rooms.is_empty() {
+                    continue;
+                }
+                modules.push(LiveModule {
+                    id,
+                    title: text_of(&m["module_info"]["title"]),
+                    link: text_of(&m["module_info"]["link"]),
+                    cover: fix_url(&text_of(&m["module_info"]["pic"])),
+                    rooms,
+                });
+            }
+        }
+
+        Ok(LiveFeed { recommend, modules })
+    }
+
+    /// 直播分区目录
+    pub async fn live_areas(&self, login: &Cookies) -> Result<Vec<LiveAreaGroup>, String> {
+        let url = format!("{LIVE_API}/xlive/web-interface/v1/index/getWebAreaList?source_id=2");
+        let value = self
+            .get_json_url_at(
+                &url,
+                login,
+                "https://live.bilibili.com/",
+                "https://live.bilibili.com",
+            )
+            .await;
+
+        // 新接口偶发不可用时回退到旧版分区目录
+        let groups_value = match value {
+            Ok(v) => {
+                let d = check(&v)?;
+                if d["data"].is_array() {
+                    d["data"].clone()
+                } else {
+                    d
+                }
+            }
+            Err(_) => {
+                let fallback = format!("{LIVE_API}/room/v1/Area/getList?parent_id=0");
+                let v = self
+                    .get_json_url_at(
+                        &fallback,
+                        login,
+                        "https://live.bilibili.com/",
+                        "https://live.bilibili.com",
+                    )
+                    .await?;
+                check(&v)?
+            }
+        };
+
+        let mut groups = Vec::new();
+        if let Some(arr) = groups_value.as_array() {
+            for g in arr {
+                let mut areas = Vec::new();
+                if let Some(list) = g["list"].as_array() {
+                    for a in list {
+                        let id = num_of(&a["id"]);
+                        if id <= 0 {
+                            continue;
+                        }
+                        areas.push(LiveArea {
+                            id,
+                            name: text_of(&a["name"]),
+                            parent_id: num_of(&a["parent_id"]),
+                            pic: fix_url(&text_of(&a["pic"])),
+                            hot: num_of(&a["hot_status"]) == 1,
+                        });
+                    }
+                }
+                if !areas.is_empty() {
+                    groups.push(LiveAreaGroup {
+                        id: num_of(&g["id"]),
+                        name: text_of(&g["name"]),
+                        areas,
+                    });
+                }
+            }
+        }
+        Ok(groups)
+    }
+
+    /// 分区房间列表。
+    ///
+    /// 官方的 `second/getList` 目前对匿名请求（包含真实浏览器）返回 -352，
+    /// 这里使用直播搜索按分区名取房间，作为稳定的替代数据源。
+    pub async fn live_rooms(
+        &self,
+        _area_id: i64,
+        area_name: &str,
+        page: u32,
+        login: &Cookies,
+    ) -> Result<PageResult<LiveRoom>, String> {
+        self.ensure_search_cookies(login).await;
+        let keyword = {
+            let k = area_name.trim();
+            if k.is_empty() {
+                "直播".to_string()
+            } else {
+                k.to_string()
+            }
+        };
+
+        let mut params = BTreeMap::new();
+        params.insert("search_type".into(), "live_room".into());
+        params.insert("keyword".into(), keyword.clone());
+        params.insert("page".into(), page.to_string());
+        params.insert("page_size".into(), "30".into());
+        params.insert("platform".into(), "pc".into());
+        params.insert("order".into(), "online".into());
+        params.insert("web_location".into(), "1430654".into());
+        let referer = format!("{SEARCH}/live?keyword={}", urlencode(&keyword));
+        let d = self
+            .wbi_get_at(
+                "/x/web-interface/wbi/search/type",
+                params,
+                login,
+                &referer,
+                SEARCH,
+            )
+            .await?;
+
+        if d.get("v_voucher").is_some() {
+            return Err("直播分区搜索触发 B 站风控，请登录账号后再试，或稍后重试".into());
+        }
+
+        let mut rooms: Vec<LiveRoom> = d["result"]
+            .as_array()
+            .map(|a| a.iter().filter_map(parse_live_search_room).collect())
+            .unwrap_or_default();
+
+        // 搜索会混入相近分区，优先保留精确匹配的同分区房间
+        let area_clean = plain_text(area_name);
+        if !area_clean.is_empty() {
+            let matched: Vec<LiveRoom> = rooms
+                .iter()
+                .filter(|r| r.area_name == area_clean)
+                .cloned()
+                .collect();
+            if matched.len() >= 4 {
+                rooms = matched;
+            }
+        }
+
+        let total = num_of(&d["numResults"]);
+        let pages = num_of(&d["numPages"]);
+        Ok(PageResult {
+            items: rooms,
+            page,
+            has_more: pages > 0 && (page as i64) < pages,
+            total,
+        })
+    }
+
+    /// 直播间详情
+    pub async fn live_room_detail(
+        &self,
+        room_id: i64,
+        login: &Cookies,
+    ) -> Result<LiveRoomDetail, String> {
+        let info_url = format!("{LIVE_API}/room/v1/Room/get_info?room_id={room_id}");
+        let anchor_url =
+            format!("{LIVE_API}/live_user/v1/UserInfo/get_anchor_in_room?roomid={room_id}");
+        let (info, anchor) = tokio::join!(
+            self.get_json_url_at(
+                &info_url,
+                login,
+                "https://live.bilibili.com/",
+                "https://live.bilibili.com",
+            ),
+            self.get_json_url_at(
+                &anchor_url,
+                login,
+                "https://live.bilibili.com/",
+                "https://live.bilibili.com",
+            )
+        );
+        let d = check(&info?)?;
+        let anchor_data = anchor
+            .ok()
+            .and_then(|v| check(&v).ok())
+            .unwrap_or(Value::Null);
+        let anchor_info = &anchor_data["info"];
+
+        let mut uname = text_of(&anchor_info["uname"]);
+        if uname.is_empty() {
+            uname = text_of(&d["uname"]);
+        }
+        let mut face = fix_url(&text_of(&anchor_info["face"]));
+        if face.is_empty() {
+            face = fix_url(&text_of(&d["face"]));
+        }
+        let tags = text_of(&d["tags"])
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        Ok(LiveRoomDetail {
+            room_id: num_of(&d["room_id"]).max(room_id),
+            uid: num_of(&d["uid"]),
+            title: text_of(&d["title"]),
+            cover: fix_url(&text_of(&d["user_cover"])),
+            keyframe: fix_url(&text_of(&d["keyframe"])),
+            description: plain_text(&text_of(&d["description"])),
+            uname,
+            face,
+            online: num_of(&d["online"]),
+            attention: num_of(&d["attention"]),
+            live_status: num_of(&d["live_status"]) as i32,
+            area_id: num_of(&d["area_id"]),
+            area_name: text_of(&d["area_name"]),
+            parent_area_id: num_of(&d["parent_area_id"]),
+            parent_area_name: text_of(&d["parent_area_name"]),
+            live_time: text_of(&d["live_time"]),
+            tags,
+        })
+    }
+
+    /// 直播播放地址（优先 FLV + AVC，适配 mpegts.js）
+    pub async fn live_play_info(
+        &self,
+        room_id: i64,
+        qn: i32,
+        login: &Cookies,
+    ) -> Result<LivePlayInfo, String> {
+        let url = format!(
+            "{LIVE_API}/xlive/web-room/v2/index/getRoomPlayInfo?room_id={room_id}&no_playurl=0&mask=1&qn={}&platform=web&protocol=0,1&format=0,1,2&codec=0,1&special_scenario=2",
+            qn.max(0)
+        );
+        let v = self
+            .get_json_url_at(
+                &url,
+                login,
+                "https://live.bilibili.com/",
+                "https://live.bilibili.com",
+            )
+            .await?;
+        let d = check(&v)?;
+
+        let mut out = LivePlayInfo {
+            room_id: num_of(&d["room_id"]).max(room_id),
+            live_status: num_of(&d["live_status"]) as i32,
+            format: "flv".into(),
+            ..Default::default()
+        };
+
+        let Some(playurl) = d
+            .get("playurl_info")
+            .and_then(|x| x.get("playurl"))
+            .filter(|x| !x.is_null())
+        else {
+            return Ok(out);
+        };
+
+        if let Some(arr) = playurl["g_qn_desc"].as_array() {
+            for q in arr {
+                let qn = num_of(&q["qn"]) as i32;
+                let desc = text_of(&q["desc"]);
+                if qn > 0 && !desc.is_empty() {
+                    out.qualities.push(LiveQuality { qn, desc });
+                }
+            }
+        }
+
+        let mut picked: Option<&Value> = None;
+        let mut fallback: Option<&Value> = None;
+        if let Some(streams) = playurl["stream"].as_array() {
+            for stream in streams {
+                if stream["protocol_name"].as_str() != Some("http_stream") {
+                    continue;
+                }
+                let Some(formats) = stream["format"].as_array() else {
+                    continue;
+                };
+                for format in formats {
+                    if format["format_name"].as_str() != Some("flv") {
+                        continue;
+                    }
+                    let Some(codecs) = format["codec"].as_array() else {
+                        continue;
+                    };
+                    for codec in codecs {
+                        if codec["codec_name"].as_str() == Some("avc") {
+                            picked = Some(codec);
+                            break;
+                        }
+                        if fallback.is_none() {
+                            fallback = Some(codec);
+                        }
+                    }
+                    if picked.is_some() {
+                        break;
+                    }
+                }
+                if picked.is_some() {
+                    break;
+                }
+            }
+        }
+
+        let Some(codec) = picked.or(fallback) else {
+            return Ok(out);
+        };
+        let base = text_of(&codec["base_url"]);
+        if let Some(urls) = codec["url_info"].as_array() {
+            for (index, item) in urls.iter().enumerate() {
+                let host = text_of(&item["host"]);
+                let extra = text_of(&item["extra"]);
+                let full = if base.starts_with("http") {
+                    format!("{base}{extra}")
+                } else {
+                    format!("{host}{base}{extra}")
+                };
+                if full.is_empty() {
+                    continue;
+                }
+                if index == 0 {
+                    out.url = full;
+                } else {
+                    out.backup_urls.push(full);
+                }
+            }
+        }
+        out.quality = num_of(&codec["current_qn"]) as i32;
+        out.accept_qn = codec["accept_qn"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|x| num_of(x) as i32)
+                    .filter(|q| *q > 0)
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.quality_desc = out
+            .qualities
+            .iter()
+            .find(|q| q.qn == out.quality)
+            .map(|q| q.desc.clone())
+            .unwrap_or_else(|| {
+                if out.quality > 0 {
+                    format!("清晰度 {}", out.quality)
+                } else {
+                    String::new()
+                }
+            });
+
+        if out.url.is_empty() {
+            return Err("未获取到直播播放地址（可能未开播或受地区限制）".into());
+        }
+        Ok(out)
+    }
 }
 
 // ---------- 构造播放信息 ----------
 
-fn build_play_info(d: &Value, is_pgc: bool) -> Result<PlayInfo, String> {
+fn build_play_info(
+    d: &Value,
+    is_pgc: bool,
+    audio_qn: i32,
+    codec: &str,
+) -> Result<PlayInfo, String> {
     let mut support: HashMap<i32, String> = HashMap::new();
     if let Some(arr) = d["support_formats"].as_array() {
         for f in arr {
@@ -1770,11 +2243,7 @@ fn build_play_info(d: &Value, is_pgc: bool) -> Result<PlayInfo, String> {
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let audio = audios
-        .iter()
-        .filter(|a| matches!(num_of(&a["id"]) as i32, 30216 | 30232 | 30280))
-        .max_by_key(|a| num_of(&a["bandwidth"]))
-        .or_else(|| audios.iter().max_by_key(|a| num_of(&a["bandwidth"])));
+    let audio = pick_audio(&audios, audio_qn);
     let audio_url = audio.map(|a| text_of(&a["baseUrl"])).unwrap_or_default();
     let audio_backups = audio.map(backup_urls).unwrap_or_default();
 
@@ -1788,11 +2257,12 @@ fn build_play_info(d: &Value, is_pgc: bool) -> Result<PlayInfo, String> {
         if q <= 0 {
             continue;
         }
-        let score = codec_score(num_of(&v["codecid"]) as i32) * 1_000_000_000
-            + num_of(&v["bandwidth"]);
+        let bandwidth = num_of(&v["bandwidth"]);
+        let score = codec_preference_score(num_of(&v["codecid"]) as i32, codec) * 1_000_000_000
+            + bandwidth;
         match best.get(&q) {
             Some(old)
-                if codec_score(num_of(&old["codecid"]) as i32) * 1_000_000_000
+                if codec_preference_score(num_of(&old["codecid"]) as i32, codec) * 1_000_000_000
                     + num_of(&old["bandwidth"])
                     >= score => {}
             _ => {
@@ -1900,6 +2370,61 @@ fn codec_score(codecid: i32) -> i64 {
     }
 }
 
+fn codec_preference_score(codecid: i32, preferred: &str) -> i64 {
+    let name = codec_name(codecid);
+    match preferred {
+        "avc" => match name.as_str() {
+            "AVC" => 5,
+            "HEVC" => 4,
+            "AV1" => 3,
+            _ => 1,
+        },
+        "hevc" => match name.as_str() {
+            "HEVC" => 5,
+            "AVC" => 4,
+            "AV1" => 3,
+            _ => 1,
+        },
+        "av1" => match name.as_str() {
+            "AV1" => 5,
+            "HEVC" => 4,
+            "AVC" => 3,
+            _ => 1,
+        },
+        _ => codec_score(codecid),
+    }
+}
+
+fn is_standard_audio(id: i32) -> bool {
+    matches!(id, 30216 | 30232 | 30280)
+}
+
+/// 按音质偏好选择音轨；偏好不可用时回退到最高码率的标准音轨。
+fn pick_audio<'a>(audios: &'a [Value], preferred: i32) -> Option<&'a Value> {
+    let by_bandwidth = |a: &&Value| num_of(&a["bandwidth"]);
+    if preferred > 0 {
+        if let Some(found) = audios
+            .iter()
+            .find(|a| num_of(&a["id"]) as i32 == preferred)
+        {
+            return Some(found);
+        }
+        if let Some(found) = audios
+            .iter()
+            .filter(|a| is_standard_audio(num_of(&a["id"]) as i32))
+            .filter(|a| (num_of(&a["id"]) as i32) <= preferred)
+            .max_by_key(|a| num_of(&a["id"]))
+        {
+            return Some(found);
+        }
+    }
+    audios
+        .iter()
+        .filter(|a| is_standard_audio(num_of(&a["id"]) as i32))
+        .max_by_key(by_bandwidth)
+        .or_else(|| audios.iter().max_by_key(by_bandwidth))
+}
+
 fn codec_name(codecid: i32) -> String {
     match codecid {
         7 => "AVC",
@@ -1968,9 +2493,13 @@ fn parse_video_card(v: &Value) -> Option<VideoCard> {
         mid: num_of(&v["owner"]["mid"]),
         play: num_of(&v["stat"]["view"]),
         danmaku: num_of(&v["stat"]["danmaku"]),
+        like: num_of(&v["stat"]["like"]),
+        tname: plain_text(&text_of(&v["tname"])),
+        is_followed: num_of(&v["is_followed"]) == 1,
         duration: fmt_dur(num_of(&v["duration"])),
         pubdate: num_of(&v["pubdate"]),
         description: text_of(&v["desc"]),
+        recommend_reason: text_of(&v["rcmd_reason"]["content"]),
     })
 }
 
@@ -1988,11 +2517,95 @@ fn parse_search_video(v: &Value) -> Option<VideoCard> {
         mid: num_of(&v["mid"]),
         play: num_of(&v["play"]),
         danmaku: num_of(&v["video_review"]),
+        like: num_of(&v["like"]),
+        tname: plain_text(&text_of(&v["typename"])),
+        is_followed: false,
         duration: text_or_num(&v["duration"]),
         pubdate: num_of(&v["pubdate"]),
         description: plain_text(&text_of(&v["description"])),
+        recommend_reason: String::new(),
     })
 }
+
+fn parse_live_rooms(v: &Value) -> Vec<LiveRoom> {
+    v.as_array()
+        .map(|a| a.iter().filter_map(parse_live_room).collect())
+        .unwrap_or_default()
+}
+
+fn parse_live_room(v: &Value) -> Option<LiveRoom> {
+    let mut room_id = num_of(&v["roomid"]);
+    if room_id <= 0 {
+        room_id = num_of(&v["room_id"]);
+    }
+    if room_id <= 0 {
+        room_id = num_of(&v["id"]);
+    }
+    if room_id <= 0 {
+        return None;
+    }
+
+    let mut cover = fix_url(&text_of(&v["cover"]));
+    if cover.is_empty() {
+        cover = fix_url(&text_of(&v["keyframe"]));
+    }
+    if cover.is_empty() {
+        cover = fix_url(&text_of(&v["user_cover"]));
+    }
+    if cover.is_empty() {
+        cover = fix_url(&text_of(&v["pic"]));
+    }
+
+    let mut uname = text_of(&v["uname"]);
+    if uname.is_empty() {
+        uname = text_of(&v["author"]);
+    }
+    let mut face = fix_url(&text_of(&v["face"]));
+    if face.is_empty() {
+        face = fix_url(&text_of(&v["uface"]));
+    }
+
+    let live_status = if v.get("live_status").is_some() {
+        num_of(&v["live_status"]) as i32
+    } else {
+        1
+    };
+
+    Some(LiveRoom {
+        room_id,
+        uid: num_of(&v["uid"]),
+        title: plain_text(&text_of(&v["title"])),
+        cover,
+        uname: plain_text(&uname),
+        face,
+        online: num_of(&v["online"]),
+        area_id: num_of(&v["area_v2_id"]),
+        area_name: plain_text(&text_of(&v["area_v2_name"])),
+        parent_area_id: num_of(&v["area_v2_parent_id"]),
+        parent_area_name: plain_text(&text_of(&v["area_v2_parent_name"])),
+        live_status,
+    })
+}
+
+fn parse_live_search_room(v: &Value) -> Option<LiveRoom> {
+    let mut room = parse_live_room(v)?;
+    if room.area_name.is_empty() {
+        room.area_name = plain_text(&text_of(&v["cate_name"]));
+    }
+    if room.parent_area_id <= 0 {
+        room.parent_area_id = num_of(&v["area"]);
+    }
+    Some(room)
+}
+
+fn merge_live_rooms(dst: &mut Vec<LiveRoom>, src: Vec<LiveRoom>) {
+    for room in src {
+        if !dst.iter().any(|r| r.room_id == room.room_id) {
+            dst.push(room);
+        }
+    }
+}
+
 
 fn parse_user_card(v: &Value) -> Option<UserCard> {
     let mid = num_of(&v["mid"]);

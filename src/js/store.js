@@ -8,6 +8,14 @@ const STORAGE_KEY = "bilibili-tauri:settings";
 const DEFAULTS = {
   theme: "system",
   quality: 80,
+  audioQuality: 30280,
+  codecPreference: "auto",
+  cdnPreference: "auto",
+  noLogin1080: true,
+  liveQuality: 250,
+  liveCdnPreference: "auto",
+  liveBufferSize: 4,
+  liveLatency: 3,
   autoplay: true,
   resume: true,
   speed: 1,
@@ -17,6 +25,18 @@ const DEFAULTS = {
   danmakuSize: 25,
   danmakuSpeed: 8,
   danmakuArea: 0.75,
+  recommendKeepRefresh: false,
+  recommendLastSeen: true,
+  recommendLastBvid: "",
+  recommendFreshIdx: 1,
+  likeRateMin: 0,
+  titleFilters: [],
+  partitionFilters: [],
+  durationMin: 0,
+  durationMax: 0,
+  playMin: 0,
+  exemptFollowed: true,
+  filterRelated: true,
   sidebarCollapsed: false,
   recentSearches: [],
 };
@@ -35,6 +55,17 @@ function clampNumber(value, min, max, fallback) {
   return Math.min(max, Math.max(min, n));
 }
 
+function sanitizeKeywords(value) {
+  if (!Array.isArray(value)) return [];
+  return [
+    ...new Set(
+      value
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+    ),
+  ].slice(0, 30);
+}
+
 function sanitize(raw) {
   const out = { ...DEFAULTS };
   if (!raw || typeof raw !== "object") return out;
@@ -45,6 +76,24 @@ function sanitize(raw) {
   )
     ? Number(raw.quality)
     : DEFAULTS.quality;
+  out.audioQuality = [30280, 30232, 30216].includes(Number(raw.audioQuality))
+    ? Number(raw.audioQuality)
+    : DEFAULTS.audioQuality;
+  out.codecPreference = ["auto", "avc", "hevc", "av1"].includes(raw.codecPreference)
+    ? raw.codecPreference
+    : DEFAULTS.codecPreference;
+  out.cdnPreference = ["auto", "backup"].includes(raw.cdnPreference)
+    ? raw.cdnPreference
+    : DEFAULTS.cdnPreference;
+  out.noLogin1080 = raw.noLogin1080 !== false;
+  out.liveQuality = [10000, 400, 250, 150, 80].includes(Number(raw.liveQuality))
+    ? Number(raw.liveQuality)
+    : DEFAULTS.liveQuality;
+  out.liveCdnPreference = ["auto", "backup"].includes(raw.liveCdnPreference)
+    ? raw.liveCdnPreference
+    : DEFAULTS.liveCdnPreference;
+  out.liveBufferSize = clampNumber(raw.liveBufferSize, 1, 16, DEFAULTS.liveBufferSize);
+  out.liveLatency = clampNumber(raw.liveLatency, 1, 12, DEFAULTS.liveLatency);
   out.autoplay = raw.autoplay !== false;
   out.resume = raw.resume !== false;
   out.speed = clampNumber(raw.speed, 0.5, 2, DEFAULTS.speed);
@@ -54,6 +103,24 @@ function sanitize(raw) {
   out.danmakuSize = clampNumber(raw.danmakuSize, 14, 40, DEFAULTS.danmakuSize);
   out.danmakuSpeed = clampNumber(raw.danmakuSpeed, 4, 14, DEFAULTS.danmakuSpeed);
   out.danmakuArea = clampNumber(raw.danmakuArea, 0.2, 1, DEFAULTS.danmakuArea);
+  out.recommendKeepRefresh = raw.recommendKeepRefresh === true;
+  out.recommendLastSeen = raw.recommendLastSeen !== false;
+  out.recommendLastBvid =
+    typeof raw.recommendLastBvid === "string" ? raw.recommendLastBvid.slice(0, 32) : "";
+  out.recommendFreshIdx = Math.round(
+    clampNumber(raw.recommendFreshIdx, 1, 9999, 1)
+  );
+  out.likeRateMin = clampNumber(raw.likeRateMin, 0, 0.5, 0);
+  out.titleFilters = sanitizeKeywords(raw.titleFilters);
+  out.partitionFilters = sanitizeKeywords(raw.partitionFilters);
+  out.durationMin = clampNumber(raw.durationMin, 0, 7200, 0);
+  out.durationMax = clampNumber(raw.durationMax, 0, 7200, 0);
+  if (out.durationMax > 0 && out.durationMax < out.durationMin) {
+    out.durationMax = out.durationMin;
+  }
+  out.playMin = clampNumber(raw.playMin, 0, 1_000_000_000, 0);
+  out.exemptFollowed = raw.exemptFollowed !== false;
+  out.filterRelated = raw.filterRelated !== false;
   out.sidebarCollapsed = raw.sidebarCollapsed === true;
   out.recentSearches = Array.isArray(raw.recentSearches)
     ? raw.recentSearches

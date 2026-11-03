@@ -16,7 +16,7 @@ use axum::routing::get;
 use axum::Router;
 use serde::Deserialize;
 
-use crate::api::types::PlayInfo;
+use crate::api::types::{LivePlayInfo, PlayInfo};
 
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 
@@ -68,6 +68,17 @@ impl ProxyHandle {
                 .filter(|u| !u.is_empty())
                 .collect();
         }
+    }
+
+    /// 直播 FLV 地址同样走本地代理，并保留全部备用 CDN 线路
+    pub fn map_live_play_info(&self, info: &mut LivePlayInfo) {
+        info.url = self.url(&info.url);
+        info.backup_urls = info
+            .backup_urls
+            .iter()
+            .map(|u| self.url(u))
+            .filter(|u| !u.is_empty())
+            .collect();
     }
 
     pub fn is_allowed(raw: &str) -> bool {
@@ -158,11 +169,22 @@ async fn stream_handler(
     } else {
         Method::GET
     };
+    let is_live = q.url.contains("/live-bvc/") || q.url.contains("live.bilibili.com");
+    let referer = if is_live {
+        "https://live.bilibili.com/"
+    } else {
+        "https://www.bilibili.com/"
+    };
+    let origin = if is_live {
+        "https://live.bilibili.com"
+    } else {
+        "https://www.bilibili.com"
+    };
     let mut req = state
         .http
         .request(upstream_method, &q.url)
-        .header(header::REFERER, "https://www.bilibili.com/")
-        .header(header::ORIGIN, "https://www.bilibili.com")
+        .header(header::REFERER, referer)
+        .header(header::ORIGIN, origin)
         .header(header::USER_AGENT, UA);
     if let Some(range) = req_headers.get(header::RANGE) {
         req = req.header(header::RANGE, range);

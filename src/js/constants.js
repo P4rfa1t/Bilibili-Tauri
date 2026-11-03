@@ -16,6 +16,36 @@ export const QUALITY_OPTIONS = [
 
 export const SPEED_OPTIONS = [2, 1.75, 1.5, 1.25, 1, 0.75, 0.5];
 
+/** 音质：B 站 DASH 音频码率（qn）。 */
+export const AUDIO_QUALITY_OPTIONS = [
+  { value: 30280, label: "192K 高码率" },
+  { value: 30232, label: "132K 标准" },
+  { value: 30216, label: "64K 流畅" },
+];
+
+/** 编码偏好：auto 按兼容性排序，其余强制优先。 */
+export const CODEC_OPTIONS = [
+  { value: "auto", label: "自动（兼容优先）" },
+  { value: "avc", label: "AVC / H.264" },
+  { value: "hevc", label: "HEVC / H.265" },
+  { value: "av1", label: "AV1" },
+];
+
+/** CDN 线路偏好：auto 用官方首选，backup 优先备用线路。 */
+export const CDN_OPTIONS = [
+  { value: "auto", label: "自动（首选线路）" },
+  { value: "backup", label: "备用线路优先" },
+];
+
+/** 直播清晰度：qn 值与直播间 getRoomPlayInfo 一致。 */
+export const LIVE_QUALITY_OPTIONS = [
+  { value: 10000, label: "原画（尽量）" },
+  { value: 400, label: "蓝光" },
+  { value: 250, label: "超清" },
+  { value: 150, label: "高清" },
+  { value: 80, label: "流畅" },
+];
+
 export const SEARCH_ORDERS = [
   { value: "totalrank", label: "综合排序" },
   { value: "click", label: "最多播放" },

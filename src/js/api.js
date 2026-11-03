@@ -28,6 +28,11 @@ export function homeFeed(kind = "popular", pn = 1, rid = 0) {
   return call("home_feed", { kind, pn, rid });
 }
 
+/** 官方首页推荐流；fresh_idx 递增即可拿到下一批。 */
+export function recommendFeed(freshIdx = 1) {
+  return call("recommend_feed", { freshIdx });
+}
+
 export function search(keyword, page = 1, kind = "video", order = "totalrank") {
   return call("search", { keyword, page, kind, order });
 }
@@ -46,12 +51,18 @@ export function videoDetail(bvid) {
   return call("video_detail", { bvid });
 }
 
-export function playInfo(bvid, cid, qn = 80) {
-  return call("play_info", { bvid, cid, qn });
+/**
+ * 播放地址。audioQn/codec 决定音轨与视频编码偏好，
+ * tryLook 让未登录状态也能拿到更高的清晰度。
+ */
+export function playInfo(bvid, cid, qn = 80, options = {}) {
+  const { audioQn = 0, codec = "auto", tryLook = false } = options;
+  return call("play_info", { bvid, cid, qn, audioQn, codec, tryLook });
 }
 
-export function pgcPlayInfo(ep, cid, qn = 80) {
-  return call("pgc_play_info", { ep, cid, qn });
+export function pgcPlayInfo(ep, cid, qn = 80, options = {}) {
+  const { audioQn = 0, codec = "auto" } = options;
+  return call("pgc_play_info", { ep, cid, qn, audioQn, codec });
 }
 
 export function danmaku(cid) {
@@ -156,6 +167,28 @@ export function bangumiList(page = 1, seasonType = 1) {
 
 export function bangumiDetail(seasonId) {
   return call("bangumi_detail", { seasonId });
+}
+
+// ---------------- Live ----------------
+
+export function liveFeed() {
+  return call("live_feed");
+}
+
+export function liveAreas() {
+  return call("live_areas");
+}
+
+export function liveRooms(areaId, areaName, page = 1) {
+  return call("live_rooms", { areaId, areaName, page });
+}
+
+export function liveRoomDetail(roomId) {
+  return call("live_room_detail", { roomId });
+}
+
+export function livePlayInfo(roomId, qn = 0) {
+  return call("live_play_info", { roomId, qn });
 }
 
 // ---------------- Misc ----------------
