@@ -414,22 +414,6 @@ impl BilibiliClient {
         check(&v)
     }
 
-    async fn wbi_get(
-        &self,
-        path: &str,
-        params: BTreeMap<String, String>,
-        login: &Cookies,
-    ) -> Result<Value, String> {
-        self.wbi_get_at(
-            path,
-            params,
-            login,
-            "https://www.bilibili.com/",
-            "https://www.bilibili.com",
-        )
-        .await
-    }
-
     // ---------- App API（无需登录，签名后调用） ----------
 
     async fn app_get(
@@ -2208,6 +2192,299 @@ impl BilibiliClient {
         }
         Ok(out)
     }
+
+    // ---------------- 动态 ----------------
+
+    /// 关注动态流（需要登录）。`kind` 为 all / video / article 等，
+    /// 首次不传 offset，之后把上一页返回的 offset 带回来即可翻页。
+    pub async fn dynamic_feed(
+        &self,
+        kind: &str,
+        offset: &str,
+        login: &Cookies,
+    ) -> Result<DynamicPage, String> {
+        self.ensure_buvid(login).await;
+        let mut params = vec![
+            ("timezone_offset", "-480".to_string()),
+            ("type", if kind.is_empty() { "all" } else { kind }.to_string()),
+            ("page", "1".to_string()),
+            ("features", "itemOpusStyle".to_string()),
+        ];
+        if !offset.is_empty() {
+            params.push(("offset", offset.to_string()));
+        }
+        let d = self
+            .api_get_at(
+                "/x/polymer/web-dynamic/v1/feed/all",
+                &params,
+                login,
+                "https://t.bilibili.com/",
+                "https://t.bilibili.com",
+            )
+            .await?;
+        let mut items = Vec::new();
+        if let Some(arr) = d["items"].as_array() {
+            for item in arr {
+                if let Some(parsed) = parse_dynamic(item) {
+                    items.push(parsed);
+                }
+            }
+        }
+        Ok(DynamicPage {
+            items,
+            offset: text_of(&d["offset"]),
+            has_more: d["has_more"].as_bool().unwrap_or(false),
+            update_num: num_of(&d["update_num"]),
+        })
+    }
+
+    // ---------------- 消息中心 ----------------
+
+    /// 消息列表。`kind` 为 reply（回复我的）/ at（@我的）/ like（收到的赞）。
+    pub async fn msg_feed(
+        &self,
+        kind: &str,
+        cursor_id: i64,
+        cursor_time: i64,
+        login: &Cookies,
+    ) -> Result<MessagePage, String> {
+        let (path, time_key) = match kind {
+            "at" => ("/x/msgfeed/at", "at_time"),
+            "like" => ("/x/msgfeed/like", "like_time"),
+            _ => ("/x/msgfeed/reply", "reply_time"),
+        };
+        let mut params = vec![
+            ("platform", "web".to_string()),
+            ("build", "0".to_string()),
+            ("mobi_app", "web".to_string()),
+        ];
+        if cursor_id > 0 && cursor_time > 0 {
+            params.push(("id", cursor_id.to_string()));
+            params.push((time_key, cursor_time.to_string()));
+        }
+        let d = self
+            .api_get_at(
+                path,
+                &params,
+                login,
+                "https://message.bilibili.com/",
+                "https://message.bilibili.com",
+            )
+            .await?;
+        // like 接口把列表放在 data.total 里，其余直接是 data
+        let bucket = if kind == "like" { d["total"].clone() } else { d.clone() };
+        let mut items = Vec::new();
+        if let Some(arr) = bucket["items"].as_array() {
+            for item in arr {
+                if let Some(parsed) = parse_message(item, kind) {
+                    items.push(parsed);
+                }
+            }
+        }
+        let cursor = &bucket["cursor"];
+        Ok(MessagePage {
+            items,
+            cursor_id: num_of(&cursor["id"]),
+            cursor_time: num_of(&cursor["time"]),
+            has_more: !cursor["is_end"].as_bool().unwrap_or(true),
+        })
+    }
+
+    /// 未读消息数（需要登录）。
+    pub async fn msg_unread(&self, login: &Cookies) -> Result<UnreadCount, String> {
+        let d = self
+            .api_get_at(
+                "/x/msgfeed/unread",
+                &[],
+                login,
+                "https://message.bilibili.com/",
+                "https://message.bilibili.com",
+            )
+            .await?;
+        let reply = num_of(&d["reply"]);
+        let at = num_of(&d["at"]);
+        let like = num_of(&d["like"]);
+        let sys_msg = num_of(&d["sys_msg"]);
+        let chat = num_of(&d["chat"]);
+        Ok(UnreadCount {
+            reply,
+            at,
+            like,
+            sys_msg,
+            chat,
+            danmu: num_of(&d["danmu"]),
+            favorite: num_of(&d["favorite"]),
+            coin: num_of(&d["coin"]),
+            up: num_of(&d["up"]),
+            total: reply + at + like + sys_msg + chat,
+        })
+    }
+}
+
+// ---------- 动态解析 ----------
+
+fn parse_dynamic(v: &Value) -> Option<DynamicItem> {
+    let id = text_of(&v["id_str"]);
+    if id.is_empty() {
+        return None;
+    }
+    let modules = &v["modules"];
+    let author = &modules["module_author"];
+    let dynamic = &modules["module_dynamic"];
+    let major = &dynamic["major"];
+    let major_type = text_of(&major["type"]);
+
+    let mut out = DynamicItem {
+        id,
+        kind: "text".into(),
+        author_mid: num_of(&author["mid"]),
+        author_name: text_of(&author["name"]),
+        author_face: fix_url(&text_of(&author["face"])),
+        pub_time: text_of(&author["pub_time"]),
+        pub_ts: num_of(&author["pub_ts"]),
+        text: plain_text(&text_of(&dynamic["desc"]["text"])),
+        ..Default::default()
+    };
+    let stat = &modules["module_stat"];
+    out.forward = num_of(&stat["forward"]["count"]);
+    out.comment = num_of(&stat["comment"]["count"]);
+    out.like = num_of(&stat["like"]["count"]);
+
+    // major 内容：视频 / 图文(opus) / 直播推荐 / 番剧
+    if let Some(archive) = major["archive"].as_object() {
+        out.kind = "av".into();
+        out.jump_url = fix_url(&text_of(&archive["jump_url"]));
+        out.archive = Some(DynamicArchive {
+            bvid: text_of(&archive["bvid"]),
+            title: plain_text(&text_of(&archive["title"])),
+            cover: fix_url(&text_of(&archive["cover"])),
+            duration: text_of(&archive["duration_text"]),
+            play: num_of(&archive["stat"]["play"]),
+            danmaku: num_of(&archive["stat"]["danmaku"]),
+        });
+    } else if let Some(opus) = major["opus"].as_object() {
+        out.kind = "opus".into();
+        out.jump_url = fix_url(&text_of(&opus["jump_url"]));
+        if out.text.is_empty() {
+            out.text = plain_text(&text_of(&opus["summary"]["text"]));
+        }
+        if let Some(pics) = opus["pics"].as_array() {
+            for pic in pics {
+                let url = fix_url(&text_of(&pic["url"]));
+                if !url.is_empty() {
+                    out.pics.push(url);
+                }
+            }
+        }
+    } else if major_type == "MAJOR_TYPE_LIVE_RCMD" {
+        out.kind = "live".into();
+        out.live = parse_dynamic_live(&major["live_rcmd"]["content"]);
+    } else if let Some(pgc) = major["pgc"].as_object() {
+        out.kind = "pgc".into();
+        out.jump_url = fix_url(&text_of(&pgc["jump_url"]));
+        out.archive = Some(DynamicArchive {
+            bvid: String::new(),
+            title: plain_text(&text_of(&pgc["title"])),
+            cover: fix_url(&text_of(&pgc["cover"])),
+            duration: text_of(&pgc["duration_text"]),
+            play: 0,
+            danmaku: 0,
+        });
+    } else if let Some(draw) = major["draw"].as_object() {
+        out.kind = "draw".into();
+        if let Some(pics) = draw["items"].as_array() {
+            for pic in pics {
+                let url = fix_url(&text_of(&pic["src"]));
+                if !url.is_empty() {
+                    out.pics.push(url);
+                }
+            }
+        }
+    }
+
+    // 转发：被转内容挂在 orig 上，转发理由在 desc 里
+    if let Some(orig) = v["orig"].as_object() {
+        out.kind = if out.kind == "text" { "forward".into() } else { out.kind };
+        out.orig = parse_dynamic(&Value::Object(orig.clone())).map(Box::new);
+    }
+
+    if out.kind == "text" && out.text.is_empty() && out.pics.is_empty() {
+        return None;
+    }
+    Some(out)
+}
+
+fn parse_dynamic_live(content: &Value) -> Option<DynamicLive> {
+    let raw = content.as_str()?;
+    let parsed: Value = serde_json::from_str(raw).ok()?;
+    let info = &parsed["live_play_info"];
+    let room_id = num_of(&info["room_id"]);
+    if room_id <= 0 {
+        return None;
+    }
+    Some(DynamicLive {
+        room_id,
+        title: plain_text(&text_of(&info["title"])),
+        cover: fix_url(&text_of(&info["cover"])),
+        area_name: text_of(&info["area_name"]),
+        online: num_of(&info["online"]),
+        uname: text_of(&info["uname"]),
+    })
+}
+
+// ---------- 消息解析 ----------
+
+fn parse_message(v: &Value, kind: &str) -> Option<MessageItem> {
+    let id = num_of(&v["id"]);
+    if id <= 0 {
+        return None;
+    }
+    let mut users = Vec::new();
+    if let Some(arr) = v["users"].as_array() {
+        for u in arr {
+            users.push(MessageUser {
+                mid: num_of(&u["mid"]),
+                name: text_of(&u["nickname"]),
+                face: fix_url(&text_of(&u["avatar"])),
+            });
+        }
+    }
+    if let Some(u) = v["user"].as_object() {
+        users.push(MessageUser {
+            mid: num_of(&u["mid"]),
+            name: text_of(&u["nickname"]),
+            face: fix_url(&text_of(&u["avatar"])),
+        });
+    }
+
+    let item = &v["item"];
+    let (time, count) = match kind {
+        "at" => (num_of(&v["at_time"]), 1),
+        "like" => (num_of(&v["like_time"]), num_of(&v["counts"])),
+        _ => (num_of(&v["reply_time"]), num_of(&v["counts"])),
+    };
+
+    let content = {
+        let source = plain_text(&text_of(&item["source_content"]));
+        if !source.is_empty() {
+            source
+        } else {
+            plain_text(&text_of(&item["root_reply_content"]))
+        }
+    };
+
+    Some(MessageItem {
+        id,
+        kind: kind.to_string(),
+        users,
+        title: plain_text(&text_of(&item["title"])),
+        business: text_of(&item["business"]),
+        content: truncate(&content, 220),
+        uri: text_of(&item["uri"]),
+        image: fix_url(&text_of(&item["image"])),
+        time,
+        count,
+    })
 }
 
 // ---------- 构造播放信息 ----------

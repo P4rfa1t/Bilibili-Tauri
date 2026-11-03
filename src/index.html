@@ -76,6 +76,10 @@
         </div>
 
         <div class="tb-right">
+          <a class="icon-btn msg-btn" id="msg-btn" href="#/messages" title="消息" aria-label="消息">
+            <span data-icon="bell"></span>
+            <span class="msg-dot hidden" id="msg-dot"></span>
+          </a>
           <button class="icon-btn" id="theme-toggle" title="切换主题" aria-label="切换主题">
             <span data-icon="sun"></span>
           </button>
@@ -106,20 +110,29 @@
         <aside class="sidebar" id="sidebar">
           <nav class="nav" aria-label="主导航">
             <div class="nav-section">发现</div>
-            <a class="nav-item" href="#/home" data-nav="home">
+            <a class="nav-item" href="#/home?channel=hot" data-nav="hot">
               <span class="nav-icon" data-icon="home"></span><span class="nav-label">首页</span>
             </a>
-            <a class="nav-item" href="#/recommend" data-nav="recommend">
+            <a class="nav-item" href="#/home?channel=dynamic" data-nav="dynamic">
+              <span class="nav-icon" data-icon="at-sign"></span><span class="nav-label">动态</span>
+            </a>
+            <a class="nav-item" href="#/home?channel=live" data-nav="live">
+              <span class="nav-icon" data-icon="radio"></span><span class="nav-label">直播</span>
+            </a>
+            <a class="nav-item" href="#/home?channel=recommend" data-nav="recommend">
               <span class="nav-icon" data-icon="compass"></span><span class="nav-label">推荐</span>
             </a>
-            <a class="nav-item" href="#/bangumi" data-nav="bangumi">
-              <span class="nav-icon" data-icon="tv"></span><span class="nav-label">番剧</span>
+            <a class="nav-item" href="#/home?channel=bangumi" data-nav="bangumi">
+              <span class="nav-icon" data-icon="tv"></span><span class="nav-label">追番</span>
             </a>
-            <a class="nav-item" href="#/live" data-nav="live">
-              <span class="nav-icon" data-icon="radio"></span><span class="nav-label">直播</span>
+            <a class="nav-item" href="#/home?channel=film" data-nav="film">
+              <span class="nav-icon" data-icon="film"></span><span class="nav-label">影视</span>
             </a>
 
             <div class="nav-section">我的</div>
+            <a class="nav-item" href="#/messages" data-nav="messages">
+              <span class="nav-icon" data-icon="bell"></span><span class="nav-label">消息</span>
+            </a>
             <a class="nav-item" href="#/history" data-nav="history">
               <span class="nav-icon" data-icon="history"></span><span class="nav-label">历史记录</span>
             </a>

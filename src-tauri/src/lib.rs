@@ -70,6 +70,9 @@ pub fn run() {
             commands::live_rooms,
             commands::live_room_detail,
             commands::live_play_info,
+            commands::dynamic_feed,
+            commands::msg_feed,
+            commands::msg_unread,
             commands::open_url,
             commands::app_version,
         ])

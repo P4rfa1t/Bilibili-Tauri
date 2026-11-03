@@ -352,9 +352,110 @@ pub struct InteractionState {
     pub fav_folders: Vec<i64>,
 }
 
+// ---------------- 动态 ----------------
+
+/// 动态里的视频卡片（投稿 / 番剧）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct SearchSuggest {
-    pub values: Vec<String>,
+pub struct DynamicArchive {
+    pub bvid: String,
+    pub title: String,
+    pub cover: String,
+    pub duration: String,
+    pub play: i64,
+    pub danmaku: i64,
+}
+
+/// 动态里被推荐的直播间
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DynamicLive {
+    pub room_id: i64,
+    pub title: String,
+    pub cover: String,
+    pub area_name: String,
+    pub online: i64,
+    pub uname: String,
+}
+
+/// 一条关注动态
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DynamicItem {
+    pub id: String,
+    /// av / opus / draw / live / pgc / forward / text
+    pub kind: String,
+    pub author_mid: i64,
+    pub author_name: String,
+    pub author_face: String,
+    pub pub_time: String,
+    pub pub_ts: i64,
+    pub text: String,
+    pub pics: Vec<String>,
+    pub jump_url: String,
+    pub forward: i64,
+    pub comment: i64,
+    pub like: i64,
+    pub archive: Option<DynamicArchive>,
+    pub live: Option<DynamicLive>,
+    /// 转发时被转发的原动态
+    pub orig: Option<Box<DynamicItem>>,
+}
+
+/// 动态分页
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DynamicPage {
+    pub items: Vec<DynamicItem>,
+    pub offset: String,
+    pub has_more: bool,
+    pub update_num: i64,
+}
+
+// ---------------- 消息 ----------------
+
+/// 消息里的用户（收到的赞可能有多人）
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MessageUser {
+    pub mid: i64,
+    pub name: String,
+    pub face: String,
+}
+
+/// 一条消息（回复 / @ / 点赞）
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MessageItem {
+    pub id: i64,
+    /// reply / at / like
+    pub kind: String,
+    pub users: Vec<MessageUser>,
+    pub title: String,
+    pub business: String,
+    pub content: String,
+    pub uri: String,
+    pub image: String,
+    pub time: i64,
+    pub count: i64,
+}
+
+/// 消息分页
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MessagePage {
+    pub items: Vec<MessageItem>,
+    pub cursor_id: i64,
+    pub cursor_time: i64,
+    pub has_more: bool,
+}
+
+/// 未读消息计数
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct UnreadCount {
+    pub reply: i64,
+    pub at: i64,
+    pub like: i64,
+    pub sys_msg: i64,
+    pub chat: i64,
+    pub danmu: i64,
+    pub favorite: i64,
+    pub coin: i64,
+    pub up: i64,
+    pub total: i64,
 }
 
 // ---------------- 直播 ----------------

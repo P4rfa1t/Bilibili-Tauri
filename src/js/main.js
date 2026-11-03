@@ -1,6 +1,6 @@
 /** Application shell: titlebar, sidebar, global search, account menu, shortcuts. */
 
-import { cachedTrending, isTauri, searchSuggest } from "./api.js";
+import { cachedTrending, isTauri, msgUnread, searchSuggest } from "./api.js";
 import { icon, mountIcons } from "./icons.js";
 import { logoutUser, openLoginModal, refreshUser } from "./login.js";
 import * as router from "./router.js";
@@ -30,6 +30,8 @@ const searchForm = document.getElementById("global-search");
 const searchInput = document.getElementById("search-input");
 const searchPop = document.getElementById("search-pop");
 const searchClear = document.getElementById("search-clear");
+const msgButton = document.getElementById("msg-btn");
+const msgDot = document.getElementById("msg-dot");
 const mobileQuery = window.matchMedia("(max-width: 980px)");
 
 let searchPopSeq = 0;
@@ -139,6 +141,36 @@ function syncAccount() {
   }
   if (accountMenu) accountMenu.innerHTML = accountMenuHtml(user);
   if (sidebarAccount) sidebarAccount.innerHTML = sidebarAccountHtml(user);
+  refreshUnread();
+}
+
+/** 顶栏铃铛的未读红点：只显示数量级别，不打断阅读。 */
+let unreadSeq = 0;
+
+async function refreshUnread() {
+  if (!msgDot) return;
+  const seq = ++unreadSeq;
+  if (!store.isLoggedIn()) {
+    msgDot.classList.add("hidden");
+    msgButton?.removeAttribute("data-count");
+    return;
+  }
+  try {
+    const unread = await msgUnread();
+    if (seq !== unreadSeq) return;
+    const total = Number(unread?.total) || 0;
+    if (total > 0) {
+      msgDot.textContent = total > 99 ? "99+" : String(total);
+      msgDot.classList.remove("hidden");
+      if (msgButton) msgButton.title = `消息（${total} 条未读）`;
+    } else {
+      msgDot.classList.add("hidden");
+      if (msgButton) msgButton.title = "消息";
+    }
+  } catch (_) {
+    if (seq !== unreadSeq) return;
+    msgDot.classList.add("hidden");
+  }
 }
 
 function openAccountMenu() {
@@ -619,6 +651,11 @@ function initShell() {
   });
 
   document.addEventListener("click", (event) => {
+    if (event.target.closest("[data-require-login]")) {
+      event.preventDefault();
+      openLoginModal();
+      return;
+    }
     const trigger = event.target.closest("[data-focus-search]");
     if (!trigger) return;
     event.preventDefault();
@@ -662,6 +699,7 @@ function initShell() {
       if (searchInput) searchInput.value = q;
       setSearchClearVisible();
     }
+    refreshUnread();
   });
 
   window.addEventListener("app:auth", syncAccount);

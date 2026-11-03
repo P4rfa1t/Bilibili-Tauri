@@ -2943,3 +2943,463 @@ a.rec-chip:hover {
     max-width: none;
   }
 }
+
+/* ==========================================================================
+   Channels（首页频道栏：动态 / 直播 / 推荐 / 热门 / 追番 / 影视）
+   ========================================================================== */
+.channel-shell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.channel-bar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: -6px 0 18px;
+  padding: 6px 0 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.channel-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.channel-tab {
+  position: relative;
+  flex: none;
+  padding: 7px 14px;
+  border-radius: 999px;
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+
+.channel-tab:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.channel-tab.active {
+  color: var(--brand);
+  background: var(--brand-soft);
+  font-weight: 600;
+}
+
+.channel-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -10px;
+  width: 22px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--brand);
+  transform: translateX(-50%);
+}
+
+.channel-body {
+  min-width: 0;
+}
+
+/* ==========================================================================
+   Dynamic（动态流）
+   ========================================================================== */
+.dyn-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.dyn-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 760px;
+}
+
+.dyn-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.dyn-author {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  color: inherit;
+}
+
+.dyn-author-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dyn-author-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.dyn-author-time {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.dyn-text {
+  margin: 0;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.68;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dyn-archive,
+.dyn-live {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: inherit;
+  transition: background 0.16s var(--ease);
+}
+
+.dyn-archive:hover,
+.dyn-live:hover {
+  background: var(--surface-3);
+}
+
+.dyn-archive-cover,
+.dyn-live-cover {
+  position: relative;
+  flex: none;
+  width: 118px;
+  aspect-ratio: 16 / 11;
+  overflow: hidden;
+  border-radius: 7px;
+  background: var(--surface-3);
+}
+
+.dyn-live-cover {
+  aspect-ratio: 16 / 9;
+}
+
+.dyn-archive-cover img,
+.dyn-live-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.dyn-archive-cover .duration {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+}
+
+.dyn-archive-body,
+.dyn-live-body {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+
+.dyn-archive-title,
+.dyn-live-title {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.dyn-archive-meta,
+.dyn-live-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.dyn-archive-meta svg,
+.dyn-live-meta svg {
+  width: 12px;
+  height: 12px;
+  margin-right: 3px;
+  vertical-align: -2px;
+}
+
+.dyn-pics {
+  display: grid;
+  gap: 6px;
+  max-width: 460px;
+}
+
+.dyn-pics[data-cols="1"] {
+  grid-template-columns: 1fr;
+}
+
+.dyn-pics[data-cols="2"] {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.dyn-pics[data-cols="3"] {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.dyn-pic {
+  display: block;
+  aspect-ratio: 1 / 1;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 7px;
+  background: var(--surface-3);
+  cursor: zoom-in;
+}
+
+.dyn-pics[data-cols="1"] .dyn-pic {
+  aspect-ratio: 16 / 10;
+}
+
+.dyn-pic img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.32s var(--ease);
+}
+
+.dyn-pic:hover img {
+  transform: scale(1.04);
+}
+
+.dyn-more {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dyn-forward {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.dyn-forward .dyn-text {
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.dyn-stats {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.dyn-stats span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ==========================================================================
+   Messages（消息中心）
+   ========================================================================== */
+.msg-tabs {
+  margin-bottom: 18px;
+}
+
+.msg-tabs .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.msg-badge {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+
+.msg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 820px;
+}
+
+.msg-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 15px 17px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: inherit;
+  box-shadow: var(--shadow-sm);
+  transition: border-color 0.16s var(--ease), transform 0.16s var(--ease);
+}
+
+a.msg-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+
+.msg-users {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.msg-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 180px;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.msg-user span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.msg-title {
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.msg-content {
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.msg-image {
+  width: 168px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: var(--surface-3);
+}
+
+.msg-image img {
+  display: block;
+  width: 100%;
+}
+
+.msg-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.msg-meta svg {
+  width: 12px;
+  height: 12px;
+  margin-right: 3px;
+  vertical-align: -2px;
+}
+
+.msg-kind {
+  display: inline-flex;
+  align-items: center;
+  color: var(--brand);
+}
+
+.msg-business {
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-size: 11px;
+  line-height: 17px;
+}
+
+@media (max-width: 760px) {
+  .dyn-list,
+  .msg-body {
+    max-width: 100%;
+  }
+
+  .dyn-card,
+  .msg-card {
+    padding: 13px 14px;
+  }
+
+  .dyn-archive-cover,
+  .dyn-live-cover {
+    width: 96px;
+  }
+
+  .dyn-pics {
+    max-width: 100%;
+  }
+}

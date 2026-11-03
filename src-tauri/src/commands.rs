@@ -467,6 +467,52 @@ pub async fn live_play_info(
     Ok(info)
 }
 
+// ---------------- 动态 ----------------
+
+#[tauri::command]
+pub async fn dynamic_feed(
+    state: State<'_, AppState>,
+    kind: Option<String>,
+    offset: Option<String>,
+) -> Result<DynamicPage, String> {
+    let login = login_of(&state);
+    state
+        .client
+        .dynamic_feed(
+            kind.as_deref().unwrap_or("all"),
+            offset.as_deref().unwrap_or(""),
+            &login,
+        )
+        .await
+}
+
+// ---------------- 消息 ----------------
+
+#[tauri::command]
+pub async fn msg_feed(
+    state: State<'_, AppState>,
+    kind: Option<String>,
+    cursor_id: Option<i64>,
+    cursor_time: Option<i64>,
+) -> Result<MessagePage, String> {
+    let login = login_of(&state);
+    state
+        .client
+        .msg_feed(
+            kind.as_deref().unwrap_or("reply"),
+            cursor_id.unwrap_or(0),
+            cursor_time.unwrap_or(0),
+            &login,
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn msg_unread(state: State<'_, AppState>) -> Result<UnreadCount, String> {
+    let login = login_of(&state);
+    state.client.msg_unread(&login).await
+}
+
 // ---------------- 其他 ----------------
 
 #[tauri::command]

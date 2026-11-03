@@ -123,6 +123,29 @@
   background: var(--brand-soft);
 }
 
+/* 消息按钮：铃铛 + 未读红点 */
+.msg-btn {
+  position: relative;
+}
+
+.msg-dot {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--brand);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  text-align: center;
+  box-shadow: 0 0 0 2px var(--header-bg);
+  pointer-events: none;
+}
+
 /* Global search ---------------------------------------------------------- */
 .global-search {
   position: relative;

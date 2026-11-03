@@ -191,6 +191,22 @@ export function livePlayInfo(roomId, qn = 0) {
   return call("live_play_info", { roomId, qn });
 }
 
+// ---------------- Dynamic & messages ----------------
+
+/** 关注动态流（需要登录）。offset 传上一页返回值即可继续翻。 */
+export function dynamicFeed(kind = "all", offset = "") {
+  return call("dynamic_feed", { kind, offset });
+}
+
+/** 消息列表。kind 为 reply（回复我的）/ at（@我的）/ like（收到的赞）。 */
+export function msgFeed(kind = "reply", cursorId = 0, cursorTime = 0) {
+  return call("msg_feed", { kind, cursorId, cursorTime });
+}
+
+export function msgUnread() {
+  return call("msg_unread");
+}
+
 // ---------------- Misc ----------------
 
 export function openUrl(url) {

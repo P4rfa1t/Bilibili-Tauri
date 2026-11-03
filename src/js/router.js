@@ -1,7 +1,9 @@
 /** Hash router with per-page cleanup support. */
 
-import * as home from "./pages/home.js";
-import * as recommend from "./pages/recommend.js";
+import * as home from "./pages/channel.js";
+import { channelForBangumiType } from "./channels.js";
+import * as dynamicPage from "./pages/dynamic.js";
+import * as messages from "./pages/messages.js";
 import * as search from "./pages/search.js";
 import * as video from "./pages/video.js";
 import * as bangumi from "./pages/bangumi.js";
@@ -16,6 +18,8 @@ import { errorText } from "./utils.js";
 
 const TITLES = {
   home: "首页",
+  dynamic: "动态",
+  messages: "消息",
   recommend: "推荐",
   search: "搜索",
   video: "视频",
@@ -53,10 +57,17 @@ export function parseLocation() {
 function resolve(route) {
   const [first, second] = route.segments;
   if (!first || first === "home") {
-    return { name: "home", module: home, params: {}, nav: "home" };
+    const channel = String(route.query.get("channel") || "").trim();
+    return { name: "home", module: home, params: {}, nav: channel || "hot" };
+  }
+  if (first === "dynamic") {
+    return { name: "dynamic", module: dynamicPage, params: {}, nav: "dynamic" };
+  }
+  if (first === "messages") {
+    return { name: "messages", module: messages, params: {}, nav: "messages" };
   }
   if (first === "recommend") {
-    return { name: "recommend", module: recommend, params: {}, nav: "recommend" };
+    return { name: "recommend", module: home, params: { channel: "recommend" }, nav: "recommend" };
   }
   if (first === "search") {
     return { name: "search", module: search, params: {}, nav: "search" };
@@ -64,19 +75,26 @@ function resolve(route) {
   if (first === "video" && second) {
     return { name: "video", module: video, params: { bvid: second }, nav: "" };
   }
+  if (first === "bangumi" && !second) {
+    const channel = channelForBangumiType(route.query.get("type"), "bangumi");
+    return { name: "bangumi", module: home, params: { channel }, nav: channel };
+  }
   if (first === "bangumi") {
     return {
       name: "bangumi",
       module: bangumi,
-      params: second ? { seasonId: second } : {},
+      params: { seasonId: second },
       nav: "bangumi",
     };
+  }
+  if (first === "live" && !second) {
+    return { name: "live", module: home, params: { channel: "live" }, nav: "live" };
   }
   if (first === "live") {
     return {
       name: "live",
       module: live,
-      params: second ? { roomId: second } : {},
+      params: { roomId: second },
       nav: "live",
     };
   }
