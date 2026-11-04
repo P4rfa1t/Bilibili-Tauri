@@ -8,7 +8,7 @@ fn login_of(state: &State<'_, AppState>) -> std::collections::BTreeMap<String, S
 }
 
 fn cookie_path(app: &AppHandle) -> Option<std::path::PathBuf> {
-    app.path().app_data_dir().ok().map(|d| d.join("cookies.json"))
+    app.path().app_data_dir().ok().map(|d| d.join("cookies.dat"))
 }
 
 fn save_cookies(state: &AppState, app: &AppHandle) {
@@ -46,6 +46,7 @@ pub async fn search(
     page: Option<u32>,
     kind: Option<String>,
     order: Option<String>,
+    duration: Option<String>,
 ) -> Result<SearchResult, String> {
     let login = login_of(&state);
     state
@@ -55,6 +56,7 @@ pub async fn search(
             page.unwrap_or(1),
             kind.as_deref().unwrap_or("video"),
             order.as_deref().unwrap_or("totalrank"),
+            duration.as_deref().unwrap_or("all"),
             &login,
         )
         .await
@@ -413,11 +415,18 @@ pub async fn comment_add(
     aid: i64,
     message: String,
     root: Option<i64>,
+    parent: Option<i64>,
 ) -> Result<CommentItem, String> {
     let login = login_of(&state);
     state
         .client
-        .comment_add(aid, &message, root.unwrap_or(0), &login)
+        .comment_add(
+            aid,
+            &message,
+            root.unwrap_or(0),
+            parent.unwrap_or(0),
+            &login,
+        )
         .await
 }
 
@@ -445,6 +454,19 @@ pub async fn space_videos(
         .await
 }
 
+#[tauri::command]
+pub async fn space_dynamics(
+    state: State<'_, AppState>,
+    mid: i64,
+    offset: Option<String>,
+) -> Result<DynamicPage, String> {
+    let login = login_of(&state);
+    state
+        .client
+        .space_dynamics(mid, offset.as_deref().unwrap_or(""), &login)
+        .await
+}
+
 // ---------------- 番剧 ----------------
 
 #[tauri::command]
@@ -452,11 +474,29 @@ pub async fn bangumi_list(
     state: State<'_, AppState>,
     page: Option<u32>,
     season_type: Option<i32>,
+    filters: Option<std::collections::HashMap<String, String>>,
 ) -> Result<PageResult<BangumiCard>, String> {
     let login = login_of(&state);
     state
         .client
-        .bangumi_list(page.unwrap_or(1), season_type.unwrap_or(1), &login)
+        .bangumi_list(
+            page.unwrap_or(1),
+            season_type.unwrap_or(1),
+            &filters.unwrap_or_default(),
+            &login,
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn bangumi_filters(
+    state: State<'_, AppState>,
+    season_type: Option<i32>,
+) -> Result<BangumiFilterSet, String> {
+    let login = login_of(&state);
+    state
+        .client
+        .bangumi_filters(season_type.unwrap_or(1), &login)
         .await
 }
 
@@ -576,9 +616,117 @@ pub async fn dynamic_uplist(state: State<'_, AppState>) -> Result<Vec<DynUp>, St
 }
 
 #[tauri::command]
+pub async fn dynamic_like(
+    state: State<'_, AppState>,
+    dyn_id: String,
+    like: bool,
+) -> Result<DynamicLikeResult, String> {
+    let login = login_of(&state);
+    state.client.dynamic_like(&dyn_id, like, &login).await
+}
+
+#[tauri::command]
+pub async fn dynamic_detail(
+    state: State<'_, AppState>,
+    dyn_id: String,
+) -> Result<DynamicItem, String> {
+    let login = login_of(&state);
+    state.client.dynamic_detail(&dyn_id, &login).await
+}
+
+#[tauri::command]
+pub async fn dynamic_comments(
+    state: State<'_, AppState>,
+    dyn_id: i64,
+    comment_type: i64,
+    page: Option<u32>,
+    sort: Option<String>,
+) -> Result<CommentPage, String> {    let login = login_of(&state);
+    state
+        .client
+        .dynamic_comments(
+            dyn_id,
+            comment_type,
+            page.unwrap_or(1),
+            sort.as_deref().unwrap_or("hot"),
+            &login,
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn dynamic_comment_add(
+    state: State<'_, AppState>,
+    dyn_id: i64,
+    comment_type: i64,
+    message: String,
+    root: Option<i64>,
+) -> Result<CommentItem, String> {
+    let login = login_of(&state);
+    state
+        .client
+        .dynamic_comment_add(
+            dyn_id,
+            comment_type,
+            &message,
+            root.unwrap_or(0),
+            &login,
+        )
+        .await
+}
+
+#[tauri::command]
+pub async fn dynamic_repost(
+    state: State<'_, AppState>,
+    dyn_id: String,
+    content: String,
+) -> Result<(), String> {
+    let login = login_of(&state);
+    state.client.dynamic_repost(&dyn_id, &content, &login).await
+}
+
+#[tauri::command]
 pub async fn live_following(state: State<'_, AppState>) -> Result<Vec<FollowingLive>, String> {
     let login = login_of(&state);
     state.client.live_following(&login).await
+}
+
+#[tauri::command]
+pub async fn dynamic_emotes(state: State<'_, AppState>) -> Result<Vec<DynamicEmotePackage>, String> {
+    let login = login_of(&state);
+    state.client.dynamic_emotes(&login).await
+}
+
+#[tauri::command]
+pub async fn dynamic_upload_image(
+    state: State<'_, AppState>,
+    data: String,
+    filename: String,
+    content_type: String,
+) -> Result<DynamicUpload, String> {
+    use base64::Engine;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data.trim())
+        .map_err(|_| "图片数据不合法".to_string())?;
+    let login = login_of(&state);
+    state
+        .client
+        .dynamic_upload_image(&bytes, &filename, &content_type, &login)
+        .await
+}
+
+#[tauri::command]
+pub async fn dynamic_publish(
+    state: State<'_, AppState>,
+    content: String,
+    pics: Vec<String>,
+    at_uids: Vec<i64>,
+) -> Result<(), String> {
+    let login = login_of(&state);
+    state
+        .client
+        .dynamic_publish(&content, &pics, &at_uids, &login)
+        .await
 }
 
 // ---------------- 直播弹幕 ----------------
@@ -601,6 +749,16 @@ pub async fn live_danmu_history(
     state.client.live_danmu_history(room_id, &login).await
 }
 
+#[tauri::command]
+pub async fn live_danmu_send(
+    state: State<'_, AppState>,
+    room_id: i64,
+    message: String,
+) -> Result<(), String> {
+    let login = login_of(&state);
+    state.client.live_danmu_send(room_id, &message, &login).await
+}
+
 // ---------------- 其他 ----------------
 
 #[tauri::command]
@@ -610,6 +768,39 @@ pub fn open_url(url: String) -> Result<(), String> {
         return Err("只允许打开 http/https 链接".into());
     }
     open::that(url).map_err(|e| e.to_string())
+}
+
+/// 在应用内新窗口打开一个网页（用于消息里的动态等无法直接渲染的页面）。
+#[tauri::command]
+pub async fn open_web_window(
+    app: AppHandle,
+    url: String,
+    title: Option<String>,
+) -> Result<(), String> {
+    let parsed = url::Url::parse(&url).map_err(|e| e.to_string())?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("只允许打开 http/https 链接".into());
+    }
+    let win_title = title.unwrap_or_else(|| "Bilibili".to_string());
+    if let Some(window) = app.get_webview_window("web") {
+        let _ = window.set_title(&win_title);
+        let _ = window.eval(&format!(
+            "location.href = {};",
+            serde_json::to_string(&url).unwrap_or_default()
+        ));
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(&app, "web", tauri::WebviewUrl::External(parsed))
+        .title(win_title)
+        .inner_size(1100.0, 820.0)
+        .min_inner_size(720.0, 520.0)
+        .center()
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[tauri::command]

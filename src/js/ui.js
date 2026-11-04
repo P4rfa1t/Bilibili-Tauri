@@ -16,6 +16,46 @@ import {
 
 export { avatarTag };
 
+// ---------------- Floating refresh button ----------------
+
+let activeRefreshFab = null;
+
+/**
+ * Turn the global bottom-right FAB into a refresh button for the current page.
+ * Returns a cleanup that removes the listener and restores the search icon.
+ */
+export function useRefreshFab(onRefresh) {
+  const fab = document.getElementById("search-fab");
+  if (!fab) return () => {};
+  if (activeRefreshFab) {
+    window.removeEventListener("app:fab-refresh", activeRefreshFab);
+    activeRefreshFab = null;
+  }
+  const handler = () => {
+    try {
+      onRefresh();
+    } catch (error) {
+      console.error("refresh fab failed", error);
+    }
+  };
+  activeRefreshFab = handler;
+  window.addEventListener("app:fab-refresh", handler);
+  fab.dataset.mode = "refresh";
+  fab.title = "刷新";
+  fab.setAttribute("aria-label", "刷新");
+  fab.innerHTML = icon("refresh-cw", 21);
+  return () => {
+    window.removeEventListener("app:fab-refresh", handler);
+    if (activeRefreshFab === handler) activeRefreshFab = null;
+    if (fab.dataset.mode === "refresh") {
+      delete fab.dataset.mode;
+      fab.title = "搜索 (Ctrl+K)";
+      fab.setAttribute("aria-label", "搜索");
+      fab.innerHTML = icon("search", 21);
+    }
+  };
+}
+
 // ---------------- Toasts ----------------
 
 const TOAST_ICONS = {
@@ -309,6 +349,12 @@ export function videoCard(v, options = {}) {
           2
         )}%"></i></div>`
       : "";
+  const watchLaterHtml =
+    !remove && Number(v.aid)
+      ? `<button class="card-watchlater" type="button" data-watchlater="${Number(
+          v.aid
+        )}" title="稍后再看" aria-label="稍后再看">${icon("clock", 15)}</button>`
+      : "";
   const dateHtml = showDate
     ? `<span class="dot"></span><span>${escapeHtml(formatDate(v.pubdate, false))}</span>`
     : "";
@@ -322,6 +368,7 @@ export function videoCard(v, options = {}) {
       ${statHtml}
       ${progressHtml}
     </a>
+    ${watchLaterHtml}
     <div class="video-body">
       <a class="video-title" href="${href}">${escapeHtml(v.title || "无标题")}</a>
       <div class="video-meta">

@@ -38,17 +38,36 @@ pub struct CookieStore(pub Cookies);
 
 impl CookieStore {
     pub fn load(p: &std::path::Path) -> Option<Self> {
-        let s = std::fs::read_to_string(p).ok()?;
-        let m: Cookies = serde_json::from_str(&s).ok()?;
-        Some(Self(m))
+        if let Ok(bytes) = std::fs::read(p) {
+            if let Ok(json) = crate::secure::open(&bytes) {
+                if let Ok(m) = serde_json::from_slice::<Cookies>(&json) {
+                    return Some(Self(m));
+                }
+            }
+        }
+        // 旧版本直接存 cookies.json，首次启动时迁移到加密文件
+        let legacy = p.with_file_name("cookies.json");
+        if legacy != p {
+            if let Ok(s) = std::fs::read_to_string(&legacy) {
+                if let Ok(m) = serde_json::from_str::<Cookies>(&s) {
+                    let store = Self(m);
+                    if store.save(p).is_ok() {
+                        let _ = std::fs::remove_file(&legacy);
+                    }
+                    return Some(store);
+                }
+            }
+        }
+        None
     }
 
     pub fn save(&self, p: &std::path::Path) -> Result<(), String> {
         if let Some(parent) = p.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let s = serde_json::to_string_pretty(&self.0).map_err(|e| e.to_string())?;
-        std::fs::write(p, s).map_err(|e| e.to_string())
+        let json = serde_json::to_vec_pretty(&self.0).map_err(|e| e.to_string())?;
+        let sealed = crate::secure::seal(&json)?;
+        std::fs::write(p, sealed).map_err(|e| e.to_string())
     }
 
     pub fn merge(&mut self, other: &Cookies) {
@@ -86,6 +105,8 @@ impl CookieStore {
 
 pub struct BilibiliClient {
     http: reqwest::Client,
+    /// 关闭 deflate 自动解码：B 站弹幕 XML 是 raw deflate，reqwest 按 zlib 解码会失败
+    raw_http: reqwest::Client,
     /// 匿名 cookie（buvid3 等），nav 等接口会下发
     base: Arc<Mutex<Cookies>>,
     /// 缓存的 WBI 混淆后的 32 位 key（key, 获取时间）
@@ -110,11 +131,18 @@ impl BilibiliClient {
         );
         let http = reqwest::Client::builder()
             .user_agent(UA)
-            .default_headers(headers)
+            .default_headers(headers.clone())
             .build()
             .expect("build reqwest client");
+        let raw_http = reqwest::Client::builder()
+            .user_agent(UA)
+            .default_headers(headers)
+            .no_deflate()
+            .build()
+            .expect("build raw reqwest client");
         Self {
             http,
+            raw_http,
             base: Arc::new(Mutex::new(Cookies::new())),
             wbi: Arc::new(Mutex::new(None)),
             search_ready: Arc::new(Mutex::new(false)),
@@ -258,13 +286,29 @@ impl BilibiliClient {
 
     async fn get_text(&self, url: &str, login: &Cookies) -> Result<String, String> {
         let cookie = Self::cookie_header(&self.merged(login));
-        let mut req = self.http.get(url);
+        let mut req = self.raw_http.get(url);
         if !cookie.is_empty() {
             req = req.header("cookie", cookie);
         }
         let resp = req.send().await.map_err(|e| e.to_string())?;
         self.absorb(&resp);
-        resp.text().await.map_err(|e| e.to_string())
+        let status = resp.status();
+        let encoding = resp
+            .headers()
+            .get(reqwest::header::CONTENT_ENCODING)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+        if !status.is_success() {
+            return Err(format!("HTTP {status}"));
+        }
+        let data = if encoding.contains("deflate") {
+            inflate_deflate(&bytes)?
+        } else {
+            bytes.to_vec()
+        };
+        Ok(String::from_utf8_lossy(&data).into_owned())
     }
 
     async fn get_json_url_at(
@@ -572,6 +616,7 @@ impl BilibiliClient {
         page: u32,
         kind: &str,
         order: &str,
+        duration: &str,
         login: &Cookies,
     ) -> Result<SearchResult, String> {
         self.ensure_search_cookies(login).await;
@@ -589,6 +634,9 @@ impl BilibiliClient {
         params.insert("web_location".into(), "1430654".into());
         if kind == "video" && !order.is_empty() {
             params.insert("order".into(), order.into());
+        }
+        if kind == "video" && !duration.is_empty() && duration != "all" && duration != "0" {
+            params.insert("duration".into(), duration.into());
         }
         let referer = format!(
             "{SEARCH}/{page_name}?keyword={}",
@@ -617,6 +665,9 @@ impl BilibiliClient {
             params.insert("web_location".into(), "1430654".into());
             if kind == "video" && !order.is_empty() {
                 params.insert("order".into(), order.into());
+            }
+            if kind == "video" && !duration.is_empty() && duration != "all" && duration != "0" {
+                params.insert("duration".into(), duration.into());
             }
             d = self
                 .wbi_get_at(
@@ -1083,6 +1134,7 @@ impl BilibiliClient {
         aid: i64,
         message: &str,
         root: i64,
+        parent: i64,
         login: &Cookies,
     ) -> Result<CommentItem, String> {
         let csrf = Self::require_login(login)?;
@@ -1100,7 +1152,10 @@ impl BilibiliClient {
         ];
         if root > 0 {
             form.push(("root".to_string(), root.to_string()));
-            form.push(("parent".to_string(), root.to_string()));
+            form.push((
+                "parent".to_string(),
+                if parent > 0 { parent } else { root }.to_string(),
+            ));
         }
         let d = self
             .post_form_at(
@@ -1794,35 +1849,121 @@ impl BilibiliClient {
 
     // ---------- 番剧 ----------
 
-    pub async fn bangumi_list(
+    /// 番剧库筛选项；接口直接返回官方页面使用的分组与排序。
+    pub async fn bangumi_filters(
         &self,
-        page: u32,
         season_type: i32,
         login: &Cookies,
-    ) -> Result<PageResult<BangumiCard>, String> {
+    ) -> Result<BangumiFilterSet, String> {
         let d = self
             .api_get(
-                "/pgc/season/index/result",
+                "/pgc/season/index/condition",
                 &[
-                    ("st", "1".into()),
-                    ("order", "3".into()),
-                    ("season_version", "-1".into()),
-                    ("spoken_language_type", "-1".into()),
-                    ("area", "-1".into()),
-                    ("is_finish", "-1".into()),
-                    ("copyright", "-1".into()),
-                    ("season_status", "-1".into()),
-                    ("season_month", "-1".into()),
-                    ("year", "-1".into()),
-                    ("style_id", "-1".into()),
-                    ("sort", "0".into()),
-                    ("page", page.to_string()),
                     ("season_type", season_type.to_string()),
-                    ("pagesize", "20".into()),
                     ("type", "1".into()),
                 ],
                 login,
             )
+            .await?;
+        let mut filters = Vec::new();
+        if let Some(arr) = d["filter"].as_array() {
+            for group in arr {
+                let field = text_of(&group["field"]);
+                let name = text_of(&group["name"]);
+                let values: Vec<FilterValue> = group["values"]
+                    .as_array()
+                    .map(|vs| {
+                        vs.iter()
+                            .map(|v| FilterValue {
+                                keyword: text_of(&v["keyword"]),
+                                name: text_of(&v["name"]),
+                            })
+                            .filter(|v| !v.keyword.is_empty())
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if !field.is_empty() && !values.is_empty() {
+                    filters.push(FilterGroup {
+                        field,
+                        name,
+                        values,
+                    });
+                }
+            }
+        }
+
+        let mut orders = vec![SortOption {
+            value: 1,
+            label: "综合排序".into(),
+        }];
+        if let Some(arr) = d["order"].as_array() {
+            let mut items: Vec<(u8, SortOption)> = Vec::new();
+            for order in arr {
+                let field = text_of(&order["field"]);
+                let Ok(value) = field.parse::<i64>() else {
+                    continue;
+                };
+                if value < 0 {
+                    continue;
+                }
+                let (rank, label) = match field.as_str() {
+                    "3" => (0, "最多追番".to_string()),
+                    "2" => (1, "最多播放".to_string()),
+                    "0" => (2, "最近更新".to_string()),
+                    "4" => (3, "最高评分".to_string()),
+                    "6" => (4, "最近上映".to_string()),
+                    "5" => (5, "开播时间".to_string()),
+                    _ => (9, text_of(&order["name"])),
+                };
+                if label.is_empty() {
+                    continue;
+                }
+                items.push((rank, SortOption { value, label }));
+            }
+            items.sort_by_key(|(rank, _)| *rank);
+            orders.extend(items.into_iter().map(|(_, order)| order));
+        }
+
+        Ok(BangumiFilterSet { filters, orders })
+    }
+
+    pub async fn bangumi_list(
+        &self,
+        page: u32,
+        season_type: i32,
+        filters: &HashMap<String, String>,
+        login: &Cookies,
+    ) -> Result<PageResult<BangumiCard>, String> {
+        let get = |key: &str, default: &str| {
+            filters
+                .get(key)
+                .map(|value| value.as_str())
+                .unwrap_or(default)
+                .to_string()
+        };
+        let mut params: Vec<(&str, String)> = vec![
+            ("st", "1".into()),
+            ("order", get("order", "1")),
+            ("season_version", get("season_version", "-1")),
+            ("spoken_language_type", get("spoken_language_type", "-1")),
+            ("area", get("area", "-1")),
+            ("is_finish", get("is_finish", "-1")),
+            ("copyright", get("copyright", "-1")),
+            ("season_status", get("season_status", "-1")),
+            ("season_month", get("season_month", "-1")),
+            ("year", get("year", "-1")),
+            ("style_id", get("style_id", "-1")),
+            ("sort", "0".into()),
+            ("page", page.to_string()),
+            ("season_type", season_type.to_string()),
+            ("pagesize", "20".into()),
+            ("type", "1".into()),
+        ];
+        if let Some(value) = filters.get("release_date") {
+            params.push(("release_date", value.clone()));
+        }
+        let d = self
+            .api_get("/pgc/season/index/result", &params, login)
             .await?;
         let mut items = Vec::new();
         if let Some(arr) = d["list"].as_array() {
@@ -1885,6 +2026,10 @@ impl BilibiliClient {
                     cover: fix_url(&text_of(&e["cover"])),
                     duration: num_of(&e["duration"]),
                     badge: text_of(&e["badge"]),
+                    skip_op_start: num_of(&e["skip"]["op"]["start"]),
+                    skip_op_end: num_of(&e["skip"]["op"]["end"]),
+                    skip_ed_start: num_of(&e["skip"]["ed"]["start"]),
+                    skip_ed_end: num_of(&e["skip"]["ed"]["end"]),
                 });
             }
         }
@@ -2371,6 +2516,210 @@ impl BilibiliClient {
         })
     }
 
+    /// 点赞 / 取消点赞一条动态。
+    pub async fn dynamic_like(
+        &self,
+        dyn_id: &str,
+        like: bool,
+        login: &Cookies,
+    ) -> Result<DynamicLikeResult, String> {
+        let csrf = Self::require_login(login)?;
+        let form = vec![
+            ("dyn_id", dyn_id.to_string()),
+            ("up", if like { "1".to_string() } else { "2".to_string() }),
+            ("csrf", csrf.clone()),
+            ("csrf_token", csrf),
+        ];
+        let cookie = Self::cookie_header(&self.merged(login));
+        let req = self
+            .http
+            .post(format!("{API}/x/dynamic/feed/dyn/thumb?platform=web"))
+            .header("referer", "https://t.bilibili.com/")
+            .header("origin", "https://t.bilibili.com")
+            .header("cookie", cookie)
+            .form(&form);
+        let v = self.finish(req).await?;
+        let d = check(&v)?;
+        Ok(DynamicLikeResult {
+            count: num_of(&d["count"]),
+            liked: like,
+        })
+    }
+
+    /// 单条动态详情（用于从消息里打开动态）。
+    pub async fn dynamic_detail(
+        &self,
+        dyn_id: &str,
+        login: &Cookies,
+    ) -> Result<DynamicItem, String> {
+        let d = self
+            .api_get_at(
+                "/x/polymer/web-dynamic/v1/detail",
+                &[
+                    ("rid", dyn_id.to_string()),
+                    ("features", "itemOpusStyle".to_string()),
+                    ("platform", "web".to_string()),
+                ],
+                login,
+                "https://t.bilibili.com/",
+                "https://t.bilibili.com",
+            )
+            .await?;
+        parse_dynamic(&d["item"]).ok_or_else(|| "动态不存在或已删除".to_string())
+    }
+
+    /// 动态评论列表（type 由动态的 basic.comment_type 提供）。
+    pub async fn dynamic_comments(
+        &self,
+        oid: i64,
+        comment_type: i64,
+        page: u32,
+        sort: &str,
+        login: &Cookies,
+    ) -> Result<CommentPage, String> {
+        self.ensure_buvid(login).await;
+        let reply_type = if comment_type > 0 { comment_type } else { 17 };
+        let sort = if sort == "time" { "0" } else { "2" };
+        let d = self
+            .api_get(
+                "/x/v2/reply",
+                &[
+                    ("type", reply_type.to_string()),
+                    ("oid", oid.to_string()),
+                    ("pn", page.to_string()),
+                    ("ps", "20".into()),
+                    ("sort", sort.into()),
+                ],
+                login,
+            )
+            .await?;
+        let items = d["replies"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| parse_comment(v, 0)).collect())
+            .unwrap_or_default();
+        let total = num_of(&d["page"]["acount"]);
+        let pages = num_of(&d["page"]["count"]);
+        Ok(CommentPage {
+            items,
+            page,
+            has_more: pages > 0 && (page as i64) < pages,
+            total,
+        })
+    }
+
+    /// 在动态下发表评论。
+    pub async fn dynamic_comment_add(
+        &self,
+        oid: i64,
+        comment_type: i64,
+        message: &str,
+        root: i64,
+        login: &Cookies,
+    ) -> Result<CommentItem, String> {
+        let csrf = Self::require_login(login)?;
+        self.ensure_buvid(login).await;
+        let text = message.trim();
+        if text.is_empty() {
+            return Err("评论内容不能为空".into());
+        }
+        let reply_type = if comment_type > 0 { comment_type } else { 17 };
+        let mut form = vec![
+            ("type".to_string(), reply_type.to_string()),
+            ("oid".to_string(), oid.to_string()),
+            ("message".to_string(), text.to_string()),
+            ("plat".to_string(), "1".to_string()),
+            ("csrf".to_string(), csrf),
+        ];
+        if root > 0 {
+            form.push(("root".to_string(), root.to_string()));
+            form.push(("parent".to_string(), root.to_string()));
+        }
+        let d = self
+            .post_form_at("/x/v2/reply/add", form, login, "https://t.bilibili.com/")
+            .await?;
+        let mut item = parse_comment(&d["reply"], if root > 0 { 1 } else { 0 }).unwrap_or_default();
+        if item.rpid <= 0 {
+            item.rpid = num_of(&d["rpid"]);
+        }
+        item.oid = oid;
+        item.message = text.to_string();
+        Ok(item)
+    }
+
+    /// 转发一条动态。
+    pub async fn dynamic_repost(
+        &self,
+        dyn_id: &str,
+        content: &str,
+        login: &Cookies,
+    ) -> Result<(), String> {
+        let csrf = Self::require_login(login)?;
+        let text = content.trim();
+        if text.chars().count() > 2000 {
+            return Err("转发内容不能超过 2000 字".into());
+        }
+        let form = vec![
+            ("dynamic_id".to_string(), "0".to_string()),
+            ("type".to_string(), "1".to_string()),
+            ("content".to_string(), text.to_string()),
+            ("rid".to_string(), dyn_id.to_string()),
+            ("csrf".to_string(), csrf.clone()),
+            ("csrf_token".to_string(), csrf),
+        ];
+        let cookie = Self::cookie_header(&self.merged(login));
+        let req = self
+            .http
+            .post("https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create")
+            .header("referer", "https://t.bilibili.com/")
+            .header("origin", "https://t.bilibili.com")
+            .header("cookie", cookie)
+            .form(&form);
+        let v = self.finish(req).await?;
+        check(&v)?;
+        Ok(())
+    }
+
+    /// 用户空间动态（需要登录才能看到完整内容）。
+    pub async fn space_dynamics(
+        &self,
+        mid: i64,
+        offset: &str,
+        login: &Cookies,
+    ) -> Result<DynamicPage, String> {
+        let mut params = vec![
+            ("host_mid", mid.to_string()),
+            ("timezone_offset", "-480".to_string()),
+            ("features", "itemOpusStyle".to_string()),
+            ("platform", "web".to_string()),
+        ];
+        if !offset.is_empty() {
+            params.push(("offset", offset.to_string()));
+        }
+        let d = self
+            .api_get_at(
+                "/x/polymer/web-dynamic/v1/feed/space",
+                &params,
+                login,
+                &format!("https://space.bilibili.com/{mid}/dynamic"),
+                "https://space.bilibili.com",
+            )
+            .await?;
+        let mut items = Vec::new();
+        if let Some(arr) = d["items"].as_array() {
+            for item in arr {
+                if let Some(parsed) = parse_dynamic(item) {
+                    items.push(parsed);
+                }
+            }
+        }
+        Ok(DynamicPage {
+            items,
+            offset: text_of(&d["offset"]),
+            has_more: d["has_more"].as_bool().unwrap_or(false),
+            update_num: 0,
+        })
+    }
+
     // ---------------- 消息中心 ----------------
 
     /// 消息列表。`kind` 为 reply（回复我的）/ at（@我的）/ like（收到的赞）。
@@ -2449,7 +2798,7 @@ impl BilibiliClient {
             favorite: num_of(&d["favorite"]),
             coin: num_of(&d["coin"]),
             up: num_of(&d["up"]),
-            total: reply + at + like + sys_msg + chat,
+            total: reply + at + like,
         })
     }
 
@@ -2467,17 +2816,33 @@ impl BilibiliClient {
                 "https://t.bilibili.com",
             )
             .await?;
+        if d["code"].as_i64().unwrap_or(0) != 0 {
+            let msg = text_of(&d["message"]);
+            return Err(if msg.is_empty() { text_of(&d["msg"]) } else { msg });
+        }
+        let d = d.get("data").cloned().unwrap_or(d);
         let mut out = Vec::new();
-        if let Some(arr) = d["items"].as_array() {
+        let list = d["up_list"]
+            .as_array()
+            .or_else(|| d["items"].as_array());
+        if let Some(arr) = list {
             for item in arr {
-                let info = &item["user_profile"]["info"];
-                let mid = num_of(&info["uid"]);
+                let info = if item["user_profile"]["info"].is_object() {
+                    &item["user_profile"]["info"]
+                } else {
+                    item
+                };
+                let mid = num_of(&info["uid"]).max(num_of(&info["mid"]));
                 if mid <= 0 {
                     continue;
                 }
+                let mut name = text_of(&info["uname"]);
+                if name.is_empty() {
+                    name = text_of(&info["name"]);
+                }
                 out.push(DynUp {
                     mid,
-                    name: text_of(&info["uname"]),
+                    name,
                     face: fix_url(&text_of(&info["face"])),
                 });
             }
@@ -2485,9 +2850,8 @@ impl BilibiliClient {
         Ok(out)
     }
 
-    /// 关注的 UP 主正在直播（动态页右栏，需要登录）。
-    pub async fn live_following(&self, login: &Cookies) -> Result<Vec<FollowingLive>, String> {
-        self.ensure_buvid(login).await;
+    /// 关注 UP 主正在直播（动态页右栏，需要登录）。
+    pub async fn live_following(&self, login: &Cookies) -> Result<Vec<FollowingLive>, String> {        self.ensure_buvid(login).await;
         let url = format!(
             "{LIVE_API}/xlive/web-ucenter/v1/xfetter/FeedList?page=1&page_size=20&platform=web"
         );
@@ -2499,21 +2863,33 @@ impl BilibiliClient {
                 "https://live.bilibili.com",
             )
             .await?;
+        if d["code"].as_i64().unwrap_or(0) != 0 {
+            let msg = text_of(&d["message"]);
+            return Err(if msg.is_empty() { text_of(&d["msg"]) } else { msg });
+        }
+        let d = d.get("data").cloned().unwrap_or(d);
         let mut out = Vec::new();
         if let Some(arr) = d["list"].as_array() {
             for item in arr {
-                let room_id = num_of(&item["roomid"]);
+                let room_id = num_of(&item["roomid"]).max(num_of(&item["room_id"]));
                 if room_id <= 0 {
                     continue;
                 }
                 let area = text_of(&item["area_name"]);
                 let parent = text_of(&item["parent_area_name"]);
+                let mut cover = text_of(&item["cover"]);
+                if cover.is_empty() {
+                    cover = text_of(&item["pic"]);
+                }
+                if cover.is_empty() {
+                    cover = text_of(&item["keyframe"]);
+                }
                 out.push(FollowingLive {
                     room_id,
                     uid: num_of(&item["uid"]),
                     name: text_of(&item["uname"]),
                     face: fix_url(&text_of(&item["face"])),
-                    cover: fix_url(&text_of(&item["pic"])),
+                    cover: fix_url(&cover),
                     title: plain_text(&text_of(&item["title"])),
                     area: if area.is_empty() { parent } else { area },
                     online: num_of(&item["online"]),
@@ -2521,6 +2897,206 @@ impl BilibiliClient {
             }
         }
         Ok(out)
+    }
+
+    /// 动态发布面板的官方表情包。
+    pub async fn dynamic_emotes(&self, login: &Cookies) -> Result<Vec<DynamicEmotePackage>, String> {
+        let url = format!("{API}/x/emote/user/panel/web?business=dynamic&platform=web");
+        let d = self
+            .get_json_url_at(&url, login, "https://t.bilibili.com/", "https://t.bilibili.com")
+            .await?;
+        if d["code"].as_i64().unwrap_or(0) != 0 {
+            let msg = text_of(&d["message"]);
+            return Err(if msg.is_empty() { text_of(&d["msg"]) } else { msg });
+        }
+        let d = d.get("data").cloned().unwrap_or(d);
+        let mut out = Vec::new();
+        if let Some(packages) = d["packages"].as_array() {
+            for (index, package) in packages.iter().enumerate() {
+                let mut name = text_of(&package["text"]);
+                if name.is_empty() {
+                    name = text_of(&package["name"]);
+                }
+                if name.is_empty() {
+                    name = format!("表情包 {}", index + 1);
+                }
+                let mut seen = std::collections::HashSet::new();
+                let mut emotes = Vec::new();
+                if let Some(items) = package["emote"].as_array() {
+                    for item in items {
+                        let text = text_of(&item["text"]);
+                        let url = fix_url(&text_of(&item["url"]));
+                        if text.is_empty() || url.is_empty() || !seen.insert(text.clone()) {
+                            continue;
+                        }
+                        emotes.push(DynamicEmote { text, url });
+                    }
+                }
+                if !emotes.is_empty() {
+                    out.push(DynamicEmotePackage { name, emotes });
+                }
+            }
+        }
+        if let Some(items) = d["recents"].as_array() {
+            let mut seen = std::collections::HashSet::new();
+            let mut emotes = Vec::new();
+            for item in items {
+                let text = text_of(&item["text"]);
+                let url = fix_url(&text_of(&item["url"]));
+                if text.is_empty() || url.is_empty() || !seen.insert(text.clone()) {
+                    continue;
+                }
+                emotes.push(DynamicEmote { text, url });
+            }
+            if !emotes.is_empty() {
+                out.insert(0, DynamicEmotePackage {
+                    name: "最近使用".into(),
+                    emotes,
+                });
+            }
+        }
+        Ok(out)
+    }
+
+    async fn upload_dynamic_image(
+        &self,
+        url: &str,
+        biz: &str,
+        data: &[u8],
+        filename: &str,
+        content_type: &str,
+        cookie: &str,
+        csrf: &str,
+    ) -> Result<Value, String> {
+        let part = reqwest::multipart::Part::bytes(data.to_vec())
+            .file_name(filename.to_string())
+            .mime_str(content_type)
+            .map_err(|e| e.to_string())?;
+        let form = reqwest::multipart::Form::new()
+            .part("file", part)
+            .text("csrf", csrf.to_string())
+            .text("csrf_token", csrf.to_string())
+            .text("biz", biz.to_string());
+        let req = self
+            .http
+            .post(url)
+            .header("referer", "https://t.bilibili.com/")
+            .header("origin", "https://t.bilibili.com")
+            .header("cookie", cookie)
+            .multipart(form);
+        self.finish(req).await
+    }
+
+    /// 上传动态配图，返回可放进 pics 的图片地址。
+    pub async fn dynamic_upload_image(
+        &self,
+        data: &[u8],
+        filename: &str,
+        content_type: &str,
+        login: &Cookies,
+    ) -> Result<DynamicUpload, String> {
+        let csrf = Self::require_login(login)?;
+        if data.is_empty() {
+            return Err("图片内容为空".into());
+        }
+        if data.len() > 12 * 1024 * 1024 {
+            return Err("单张图片不能超过 12MB".into());
+        }
+        let mime = if content_type.is_empty() {
+            "image/jpeg"
+        } else {
+            content_type
+        };
+        let name = if filename.is_empty() { "image.jpg" } else { filename };
+        let cookie = Self::cookie_header(&self.merged(login));
+
+        let primary = self
+            .upload_dynamic_image(
+                "https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs",
+                "dynamic",
+                data,
+                name,
+                mime,
+                &cookie,
+                &csrf,
+            )
+            .await;
+        let value = match primary {
+            Ok(v) if v["code"].as_i64().unwrap_or(-1) == 0 => v,
+            _ => {
+                self.upload_dynamic_image(
+                    "https://api.vc.bilibili.com/api/v1/drawImage/upload",
+                    "draw",
+                    data,
+                    name,
+                    mime,
+                    &cookie,
+                    &csrf,
+                )
+                .await?
+            }
+        };
+        let d = check(&value)?;
+        let mut url = text_of(&d["image_url"]);
+        if url.is_empty() {
+            url = text_of(&d["url"]);
+        }
+        let url = fix_url(&url);
+        if url.is_empty() {
+            return Err("图片上传失败，请稍后重试".into());
+        }
+        Ok(DynamicUpload {
+            url,
+            width: num_of(&d["image_width"]),
+            height: num_of(&d["image_height"]),
+        })
+    }
+
+    /// 发布一条图文动态。
+    pub async fn dynamic_publish(
+        &self,
+        content: &str,
+        pics: &[String],
+        at_uids: &[i64],
+        login: &Cookies,
+    ) -> Result<(), String> {
+        let csrf = Self::require_login(login)?;
+        let text = content.trim();
+        if text.is_empty() && pics.is_empty() {
+            return Err("动态内容不能为空".into());
+        }
+        if text.chars().count() > 2000 {
+            return Err("动态内容不能超过 2000 字".into());
+        }
+        let mut form = vec![
+            ("dynamic_id", "0".to_string()),
+            ("type", "1".to_string()),
+            ("content", text.to_string()),
+            ("pics", pics.join(",")),
+            ("csrf", csrf.clone()),
+            ("csrf_token", csrf),
+        ];
+        if !at_uids.is_empty() {
+            form.push((
+                "at_uids",
+                at_uids
+                    .iter()
+                    .map(|mid| mid.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ));
+        }
+        let cookie = Self::cookie_header(&self.merged(login));
+        let req = self
+            .http
+            .post("https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create")
+            .header("referer", "https://t.bilibili.com/")
+            .header("origin", "https://t.bilibili.com")
+            .header("cookie", cookie)
+            .form(&form);
+        let v = self.finish(req).await?;
+        check(&v)?;
+        Ok(())
     }
 
     /// 直播弹幕服务器凭据。
@@ -2537,6 +3113,11 @@ impl BilibiliClient {
                 "https://live.bilibili.com",
             )
             .await?;
+        if d["code"].as_i64().unwrap_or(0) != 0 {
+            let msg = text_of(&d["message"]);
+            return Err(if msg.is_empty() { text_of(&d["msg"]) } else { msg });
+        }
+        let d = d.get("data").cloned().unwrap_or(d);
         let mut servers = Vec::new();
         if let Some(arr) = d["host_server_list"].as_array() {
             for s in arr {
@@ -2588,6 +3169,11 @@ impl BilibiliClient {
                 "https://live.bilibili.com",
             )
             .await?;
+        if d["code"].as_i64().unwrap_or(0) != 0 {
+            let msg = text_of(&d["message"]);
+            return Err(if msg.is_empty() { text_of(&d["msg"]) } else { msg });
+        }
+        let d = d.get("data").cloned().unwrap_or(d);
         let mut items = Vec::new();
         if let Some(arr) = d["room"].as_array() {
             for m in arr {
@@ -2607,6 +3193,46 @@ impl BilibiliClient {
             }
         }
         Ok(DanmuHistory { items })
+    }
+
+    /// 在直播间发送一条弹幕（需要登录）。
+    pub async fn live_danmu_send(
+        &self,
+        room_id: i64,
+        message: &str,
+        login: &Cookies,
+    ) -> Result<(), String> {
+        let csrf = Self::require_login(login)?;
+        let text = message.trim();
+        if text.is_empty() {
+            return Err("弹幕内容不能为空".into());
+        }
+        if text.chars().count() > 20 {
+            return Err("直播弹幕最多 20 个字".into());
+        }
+        let rnd = now_secs().saturating_mul(1000).saturating_add(7);
+        let form = vec![
+            ("bubble", "0".to_string()),
+            ("msg", text.to_string()),
+            ("color", "16777215".to_string()),
+            ("mode", "1".to_string()),
+            ("fontsize", "25".to_string()),
+            ("rnd", rnd.to_string()),
+            ("roomid", room_id.to_string()),
+            ("csrf", csrf.clone()),
+            ("csrf_token", csrf),
+        ];
+        let cookie = Self::cookie_header(&self.merged(login));
+        let req = self
+            .http
+            .post(format!("{LIVE_API}/msg/send"))
+            .header("referer", format!("https://live.bilibili.com/{room_id}"))
+            .header("origin", "https://live.bilibili.com")
+            .header("cookie", cookie)
+            .form(&form);
+        let v = self.finish(req).await?;
+        check(&v)?;
+        Ok(())
     }
 }
 
@@ -2638,6 +3264,9 @@ fn parse_dynamic(v: &Value) -> Option<DynamicItem> {
     out.forward = num_of(&stat["forward"]["count"]);
     out.comment = num_of(&stat["comment"]["count"]);
     out.like = num_of(&stat["like"]["count"]);
+    out.liked = stat["like"]["status"].as_i64().unwrap_or(0) == 1;
+    out.comment_id = text_of(&v["basic"]["comment_id_str"]);
+    out.comment_type = num_of(&v["basic"]["comment_type"]);
 
     // major 内容：视频 / 图文(opus) / 直播推荐 / 番剧
     if let Some(archive) = major["archive"].as_object() {
@@ -2762,6 +3391,17 @@ fn parse_message(v: &Value, kind: &str) -> Option<MessageItem> {
         }
     };
 
+    let mut cover = text_of(&item["cover"]);
+    if cover.is_empty() {
+        cover = text_of(&item["pic"]);
+    }
+    if cover.is_empty() {
+        cover = text_of(&item["source_cover"]);
+    }
+    if cover.is_empty() {
+        cover = text_of(&item["cover_url"]);
+    }
+
     Some(MessageItem {
         id,
         kind: kind.to_string(),
@@ -2771,6 +3411,12 @@ fn parse_message(v: &Value, kind: &str) -> Option<MessageItem> {
         content: truncate(&content, 220),
         uri: text_of(&item["uri"]),
         image: fix_url(&text_of(&item["image"])),
+        cover: fix_url(&cover),
+        source_id: num_of(&item["source_id"]),
+        subject_id: num_of(&item["subject_id"]),
+        target_id: num_of(&item["target_id"]),
+        business_id: num_of(&item["business_id"]),
+        root_id: num_of(&item["root_id"]),
         time,
         count,
     })
@@ -3020,6 +3666,26 @@ fn quality_label(q: i32) -> String {
 }
 
 // ---------- 解析 ----------
+
+fn inflate_deflate(data: &[u8]) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+
+    let mut out = Vec::new();
+    if flate2::read::DeflateDecoder::new(data)
+        .read_to_end(&mut out)
+        .is_ok()
+    {
+        return Ok(out);
+    }
+    out.clear();
+    if flate2::read::ZlibDecoder::new(data)
+        .read_to_end(&mut out)
+        .is_ok()
+    {
+        return Ok(out);
+    }
+    Err("弹幕数据解压失败".into())
+}
 
 fn check(v: &Value) -> Result<Value, String> {
     let code = v["code"].as_i64().unwrap_or(-1);

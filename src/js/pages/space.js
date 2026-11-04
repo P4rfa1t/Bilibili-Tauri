@@ -2,6 +2,7 @@ import {
   bilibiliSpaceUrl,
   followUser,
   openExternal,
+  spaceDynamics,
   spaceInfo,
   spaceVideos,
 } from "../api.js";
@@ -14,9 +15,12 @@ import {
   emptyState,
   errorState,
   skeletonGrid,
+  skeletonRows,
   toast,
+  useRefreshFab,
   videoCard,
 } from "../ui.js";
+import { dynamicCardHtml, bindDynamicList } from "./dynamic.js";
 import {
   errorText,
   escapeHtml,
@@ -38,6 +42,10 @@ export async function render(root, ctx) {
 
   let disposed = false;
   let loader = null;
+  let dynamicLoader = null;
+
+  const stopRefreshFab = useRefreshFab(() => ctx.refresh());
+
   const onAuth = () => {
     if (!disposed) ctx.refresh();
   };
@@ -47,7 +55,10 @@ export async function render(root, ctx) {
     disposed = true;
     loader?.remove();
     loader = null;
+    dynamicLoader?.remove();
+    dynamicLoader = null;
     window.removeEventListener("app:auth", onAuth);
+    stopRefreshFab();
   };
 
   const [infoResult, videoResult] = await Promise.allSettled([
@@ -108,21 +119,21 @@ export async function render(root, ctx) {
       </div>
     </section>
 
-    <div class="space-section-head">
-      <h2>${icon("list-video", 18)}投稿 <span class="sub">共 ${formatCount(total)} 个视频</span></h2>
-      <button class="btn btn-sm btn-outline" type="button" data-refresh>${icon(
-        "refresh-cw",
-        14
-      )}刷新</button>
+    <div class="tabs-line space-tabs" data-space-tabs>
+      <button class="tab active" type="button" data-space-tab="video">
+        ${icon("list-video", 15)}投稿 <span class="sub">${formatCount(total)}</span>
+      </button>
+      <button class="tab" type="button" data-space-tab="dynamic">${icon("activity", 15)}动态</button>
     </div>
-    <div data-space-results></div>`;
+    <div data-space-video></div>
+    <div data-space-dynamic hidden></div>`;
 
   document.title = `${info.name || "用户空间"} - Bilibili-Tauri`;
 
-  const results = root.querySelector("[data-space-results]");
+  const videoPane = root.querySelector("[data-space-video]");
+  const dynamicPane = root.querySelector("[data-space-dynamic]");
   const followBtn = root.querySelector("[data-follow]");
 
-  root.querySelector("[data-refresh]")?.addEventListener("click", () => ctx.refresh());
   root.querySelector("[data-external]")?.addEventListener("click", async () => {
     const ok = await openExternal(bilibiliSpaceUrl(mid));
     if (!ok) toast("无法打开浏览器", "error");
@@ -148,26 +159,6 @@ export async function render(root, ctx) {
     }
   });
 
-  if (videoResult.status === "rejected") {
-    results.innerHTML = errorState(videoResult.reason, { title: "投稿加载失败" });
-    results.querySelector("[data-retry]")?.addEventListener("click", () => ctx.refresh());
-    return cleanup;
-  }
-
-  if (!videos.length) {
-    results.innerHTML = emptyState(
-      "还没有投稿",
-      "这位 UP 主暂时没有公开视频。",
-      "",
-      "list-video"
-    );
-    return cleanup;
-  }
-
-  const grid = document.createElement("div");
-  grid.className = "video-grid";
-  results.append(grid);
-
   const cardFor = (item) =>
     videoCard(
       {
@@ -179,18 +170,112 @@ export async function render(root, ctx) {
       { showDanmaku: true, showDate: true }
     );
 
-  grid.innerHTML = videos.map(cardFor).join("");
+  let videoRendered = false;
+  const renderVideo = () => {
+    if (videoRendered) return;
+    videoRendered = true;
+    if (videoResult.status === "rejected") {
+      videoPane.innerHTML = errorState(videoResult.reason, { title: "投稿加载失败" });
+      videoPane.querySelector("[data-retry]")?.addEventListener("click", () => ctx.refresh());
+      return;
+    }
+    if (!videos.length) {
+      videoPane.innerHTML = emptyState(
+        "还没有投稿",
+        "这位 UP 主暂时没有公开视频。",
+        "",
+        "list-video"
+      );
+      return;
+    }
+    const grid = document.createElement("div");
+    grid.className = "video-grid";
+    videoPane.append(grid);
+    grid.innerHTML = videos.map(cardFor).join("");
+    if (firstPage?.has_more) {
+      let page = Number(firstPage.page) || 1;
+      loader = createInfiniteLoader(videoPane, async () => {
+        const data = await spaceVideos(mid, page + 1);
+        if (disposed) return false;
+        page = Number(data.page) || page + 1;
+        grid.insertAdjacentHTML("beforeend", (data.items || []).map(cardFor).join(""));
+        return Boolean(data.has_more);
+      });
+    }
+  };
 
-  if (firstPage?.has_more) {
-    let page = Number(firstPage.page) || 1;
-    loader = createInfiniteLoader(results, async () => {
-      const data = await spaceVideos(mid, page + 1);
-      if (disposed) return false;
-      page = Number(data.page) || page + 1;
-      grid.insertAdjacentHTML("beforeend", (data.items || []).map(cardFor).join(""));
-      return Boolean(data.has_more);
+  let activeTab = ctx.query.get("tab") === "dynamic" ? "dynamic" : "video";
+  let dynamicLoaded = false;
+
+  const loadDynamic = async () => {
+    if (dynamicLoaded) return;
+    dynamicLoaded = true;
+    dynamicLoader?.remove();
+    dynamicLoader = null;
+    dynamicPane.innerHTML = skeletonRows(4);
+    try {
+      const data = await spaceDynamics(mid, "");
+      if (disposed || ctx.signal.aborted) return;
+      const items = data.items || [];
+      dynamicPane.innerHTML = "";
+      if (!items.length) {
+        dynamicPane.innerHTML = emptyState(
+          "还没有动态",
+          "这位 UP 主暂时没有公开动态。",
+          "",
+          "activity"
+        );
+        return;
+      }
+      const list = document.createElement("div");
+      list.className = "dyn-list";
+      list.innerHTML = items.map(dynamicCardHtml).join("");
+      dynamicPane.append(list);
+      bindDynamicList(list);
+      let offset = String(data.offset || "");
+      if (data.has_more && offset) {
+        dynamicLoader = createInfiniteLoader(dynamicPane, async () => {
+          const next = await spaceDynamics(mid, offset);
+          if (disposed || ctx.signal.aborted) return false;
+          offset = String(next.offset || "");
+          list.insertAdjacentHTML("beforeend", (next.items || []).map(dynamicCardHtml).join(""));
+          return Boolean(next.has_more) && Boolean(offset);
+        });
+      }
+    } catch (error) {
+      if (disposed) return;
+      dynamicLoaded = false;
+      dynamicPane.innerHTML = errorState(error);
+      dynamicPane.querySelector("[data-retry]")?.addEventListener("click", () => loadDynamic());
+    }
+  };
+
+  const setTab = (tab, { replace = true } = {}) => {
+    activeTab = tab === "dynamic" ? "dynamic" : "video";
+    videoPane.hidden = activeTab !== "video";
+    dynamicPane.hidden = activeTab !== "dynamic";
+    root.querySelectorAll("[data-space-tab]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.spaceTab === activeTab);
     });
-  }
+    if (replace) {
+      history.replaceState(
+        null,
+        "",
+        `#/space/${mid}${activeTab === "dynamic" ? "?tab=dynamic" : ""}`
+      );
+    }
+    if (activeTab === "video") renderVideo();
+    else loadDynamic();
+  };
+
+  root.querySelector("[data-space-tabs]")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-space-tab]");
+    if (!button) return;
+    setTab(button.dataset.spaceTab, { replace: true });
+  });
+
+  renderVideo();
+  setTab(activeTab, { replace: false });
 
   return cleanup;
 }

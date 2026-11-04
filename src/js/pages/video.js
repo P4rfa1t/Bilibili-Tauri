@@ -22,6 +22,8 @@ import {
   watchLaterAdd,
 } from "../api.js";
 import { icon } from "../icons.js";
+import { insertIntoTextarea } from "../editor.js";
+import { mountEmotePicker, loadEmotePackages, renderEmoteText } from "../emotes.js";
 import { ensureLogin } from "../login.js";
 import { orderStreams, videoPlayOptions } from "../media.js";
 import { Player } from "../player/player.js";
@@ -75,7 +77,7 @@ function replyHtml(reply) {
         ${reply.level ? `<span class="level-badge">Lv${Number(reply.level)}</span>` : ""}
         <span class="comment-time">${escapeHtml(timeAgo(reply.ctime))}</span>
       </div>
-      <div class="comment-text">${escapeHtml(reply.message || "")}</div>
+      <div class="comment-text">${renderEmoteText(reply.message || "")}</div>
     </div>
     <button class="comment-reply-btn" type="button" data-reply-to="${Number(reply.rpid) || 0}" data-reply-name="${escapeAttr(
     reply.name || ""
@@ -100,7 +102,7 @@ function commentHtml(item) {
         ${item.level ? `<span class="level-badge">Lv${Number(item.level)}</span>` : ""}
         <span class="comment-time">${escapeHtml(timeAgo(item.ctime))}</span>
       </div>
-      <div class="comment-text">${escapeHtml(item.message || "")}</div>
+      <div class="comment-text">${renderEmoteText(item.message || "")}</div>
       ${
         pictures.length
           ? `<div class="comment-pics">${pictures
@@ -150,9 +152,14 @@ function commentComposerHtml() {
       </div>
       <textarea class="comment-input" data-comment-input rows="2" placeholder="发一条友善的评论" maxlength="1000"></textarea>
       <div class="comment-composer-foot">
+        <button class="comment-emoji-btn" type="button" data-comment-emoji title="表情" aria-label="表情">${icon(
+          "smile",
+          16
+        )}</button>
         <span class="comment-composer-count" data-comment-counter>0/1000</span>
         <button class="btn btn-sm btn-primary" type="button" data-comment-submit>发表评论</button>
       </div>
+      <div class="emote-picker comment-emote-picker" data-comment-emote-picker hidden></div>
     </div>
   </div>`;
 }
@@ -272,8 +279,13 @@ export async function render(root, ctx) {
   const descCollapsed = description.length > 260;
 
   root.innerHTML = `<div class="watch-layout">
-    <div class="watch-stage">
-      <div class="watch-player" data-player-mount></div>
+    <div class="watch-column">
+      <div class="watch-stage">
+        <div class="watch-player" data-player-mount></div>
+      </div>
+      <div class="watch-under">
+        ${relatedCardHtml(related)}
+      </div>
     </div>
 
     <aside class="watch-rail">
@@ -380,10 +392,6 @@ export async function render(root, ctx) {
           <div class="comment-list" data-comment-list>${skeletonRows(3)}</div>
         </section>
       </div>
-
-      <div class="watch-rail-related">
-        ${relatedCardHtml(related)}
-      </div>
     </aside>
   </div>`;
 
@@ -477,9 +485,13 @@ export async function render(root, ctx) {
   loadStream();
 
   Promise.allSettled([
-    fetchDanmaku(cid).then((items) => {
-      if (!disposed) player?.setDanmaku(items);
-    }),
+    fetchDanmaku(cid)
+      .then((items) => {
+        if (!disposed) player?.setDanmaku(items);
+      })
+      .catch((error) => {
+        console.warn("danmaku load failed", errorText(error));
+      }),
     videoSubtitles(bvid, cid).then((tracks) => {
       if (disposed) return;
       player?.setSubtitles(tracks, (track) => subtitleCues(track.url));
@@ -831,6 +843,17 @@ export async function render(root, ctx) {
   const commentCounter = root.querySelector("[data-comment-counter]");
   const replyHint = root.querySelector("[data-reply-hint]");
   const replyTargetEl = root.querySelector("[data-reply-target]");
+  const composerEmotePanel = root.querySelector("[data-comment-emote-picker]");
+
+  root.querySelector("[data-comment-emoji]")?.addEventListener("click", () => {
+    if (!composerEmotePanel) return;
+    composerEmotePanel.hidden = !composerEmotePanel.hidden;
+    if (composerEmotePanel.hidden || composerEmotePanel.dataset.ready === "1") return;
+    composerEmotePanel.dataset.ready = "1";
+    mountEmotePicker(composerEmotePanel, (emote) =>
+      insertIntoTextarea(commentInput, emote.text)
+    );
+  });
 
   const setReplyTarget = (rpid, name) => {
     replyRoot = Number(rpid) || 0;
@@ -933,6 +956,7 @@ export async function render(root, ctx) {
     commentList.innerHTML = skeletonRows(3);
     const token = ++commentToken;
     try {
+      await loadEmotePackages().catch(() => {});
       const data = await fetchComments(info.aid, 1, commentSort);
       if (disposed || token !== commentToken) return;
       commentPage = data.page || 1;
@@ -957,6 +981,76 @@ export async function render(root, ctx) {
     }
   };
 
+  const showInlineReply = (anchor, rootRpid, parentRpid, name) => {
+    const host = anchor.closest(".comment");
+    if (!host) return;
+    host.querySelectorAll(".comment-inline-reply").forEach((el) => el.remove());
+    const label = name || "该用户";
+    const box = document.createElement("div");
+    box.className = "comment-inline-reply";
+    box.innerHTML = `<div class="inline-reply-head"><span>回复 <b>@${escapeHtml(
+      label
+    )}</b></span><button type="button" data-inline-cancel>取消</button></div>
+      <textarea class="comment-input" rows="2" maxlength="1000" placeholder="回复 @${escapeAttr(
+        label
+      )}" data-inline-input></textarea>
+      <div class="inline-reply-foot">
+        <button class="comment-emoji-btn" type="button" data-inline-emoji title="表情" aria-label="表情">${icon(
+          "smile",
+          15
+        )}</button>
+        <span class="inline-reply-count" data-inline-count>0/1000</span>
+        <button class="btn btn-sm btn-primary" type="button" data-inline-send>发送</button>
+      </div>
+      <div class="emote-picker inline-emote-picker" data-inline-emotes hidden></div>`;
+    const subRow = anchor.closest(".comment-reply");
+    if (subRow) subRow.after(box);
+    else anchor.closest(".comment-actions")?.after(box);
+
+    const input = box.querySelector("[data-inline-input]");
+    const count = box.querySelector("[data-inline-count]");
+    const emotePanel = box.querySelector("[data-inline-emotes]");
+    input.focus();
+    input.addEventListener("input", () => {
+      count.textContent = `${input.value.length}/1000`;
+    });
+    box.querySelector("[data-inline-emoji]")?.addEventListener("click", () => {
+      emotePanel.hidden = !emotePanel.hidden;
+      if (emotePanel.hidden || emotePanel.dataset.ready === "1") return;
+      emotePanel.dataset.ready = "1";
+      mountEmotePicker(emotePanel, (emote) => insertIntoTextarea(input, emote.text));
+    });
+    box.querySelector("[data-inline-cancel]")?.addEventListener("click", () => box.remove());
+    box.querySelector("[data-inline-send]")?.addEventListener("click", async () => {
+      if (!ensureLogin("发表评论需要先登录")) return;
+      const text = input.value.trim();
+      if (!text) {
+        toast("评论内容不能为空", "error");
+        return;
+      }
+      const send = box.querySelector("[data-inline-send]");
+      send.disabled = true;
+      send.textContent = "发送中…";
+      try {
+        const created = await commentAdd(info.aid, text, rootRpid, parentRpid);
+        const wrap = host.querySelector(".comment-replies");
+        const html = replyHtml(created);
+        if (wrap) wrap.insertAdjacentHTML("beforeend", html);
+        else
+          host
+            .querySelector(".comment-main")
+            ?.insertAdjacentHTML("beforeend", `<div class="comment-replies">${html}</div>`);
+        box.remove();
+        toast("回复成功", "success");
+      } catch (error) {
+        toast(errorText(error), "error");
+      } finally {
+        send.disabled = false;
+        send.textContent = "发送";
+      }
+    });
+  };
+
   commentList.addEventListener("click", async (event) => {
     const pic = event.target.closest("[data-comment-pic]");
     if (pic) {
@@ -964,15 +1058,21 @@ export async function render(root, ctx) {
       return;
     }
 
-    // 回复某条评论
+    // 回复某条评论：在评论下方就地展开输入框，不再跳回顶部
     const replyBtn = event.target.closest("[data-reply-to]");
     if (replyBtn) {
       event.preventDefault();
-      const rpid = Number(replyBtn.dataset.replyTo) || 0;
-      // 回复子回复时，root 要落到楼层主评论上
+      const subRow = replyBtn.closest(".comment-reply");
       const host = replyBtn.closest(".comment");
-      const rootRpid = Number(host?.dataset.rpid) || rpid;
-      setReplyTarget(rootRpid, replyBtn.dataset.replyName || "");
+      const parentRpid = subRow ? Number(subRow.dataset.subRpid) || 0 : 0;
+      const rootRpid =
+        Number(host?.dataset.rpid) || Number(replyBtn.dataset.replyTo) || 0;
+      showInlineReply(
+        replyBtn,
+        rootRpid,
+        parentRpid,
+        replyBtn.dataset.replyName || ""
+      );
       return;
     }
 

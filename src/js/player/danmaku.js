@@ -43,6 +43,8 @@ export class DanmakuEngine {
     this.lineHeight = 36;
     this.maxLanes = 8;
     this.lastTime = -1;
+    this.drawnTime = -1;
+    this.dirty = true;
     this.raf = 0;
     this.destroyed = false;
 
@@ -85,6 +87,7 @@ export class DanmakuEngine {
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.fontScale = clamp(width / 1280, 0.58, 1.2);
     this.recalcLanes();
+    this.dirty = true;
     this.seek(this.getTime());
   }
 
@@ -115,11 +118,13 @@ export class DanmakuEngine {
     }
     this.fontScale = clamp(this.width / 1280, 0.58, 1.2);
     this.recalcLanes();
+    this.dirty = true;
     if (reset) this.seek(this.getTime());
   }
 
   setEnabled(enabled) {
     this.enabled = Boolean(enabled);
+    this.dirty = true;
     if (this.enabled) this.seek(this.getTime());
     else {
       this.active = [];
@@ -160,6 +165,8 @@ export class DanmakuEngine {
     this.topLanes = new Array(this.maxLanes).fill(0);
     this.bottomLanes = new Array(this.maxLanes).fill(0);
     this.lastTime = t;
+    this.drawnTime = -1;
+    this.dirty = true;
     this.index = this.lowerBound(t - 0.12);
     this.clear();
   }
@@ -175,14 +182,66 @@ export class DanmakuEngine {
     return lo;
   }
 
+  /** 返回当前时刻鼠标下的弹幕，供播放器显示复制按钮。 */
+  hitTest(clientX, clientY) {
+    if (!this.enabled || !this.width || !this.height) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
+    if (x < 0 || y < 0 || x > this.width || y > this.height) return null;
+
+    const now = this.getTime();
+    const height = this.fontPx * 1.28;
+    for (let i = this.active.length - 1; i >= 0; i -= 1) {
+      const entry = this.active[i];
+      let ex;
+      let ey;
+      if (entry.mode === 1) {
+        const elapsed = (entry.frozenAt ?? now) - entry.spawnAt;
+        ex = this.width - (elapsed / entry.travel) * (this.width + entry.width);
+        ey = entry.lane * this.lineHeight + 4;
+      } else {
+        const elapsed = (entry.frozenAt ?? now) - entry.spawnAt;
+        if (elapsed > FIXED_DURATION) continue;
+        ex = (this.width - entry.width) / 2;
+        ey =
+          entry.mode === 5
+            ? entry.lane * this.lineHeight + 4
+            : this.height - (entry.lane + 1) * this.lineHeight - 2;
+      }
+      if (x >= ex - 2 && x <= ex + entry.width + 2 && y >= ey - 2 && y <= ey + height) {
+        return {
+          content: entry.content,
+          color: entry.color,
+          x: ex,
+          y: ey,
+          width: entry.width,
+          entry,
+        };
+      }
+    }
+    return null;
+  }
+
+  freeze(entry) {
+    if (!entry || entry.frozenAt != null) return;
+    entry.frozenAt = this.getTime();
+    this.dirty = true;
+  }
+
+  unfreeze(entry) {
+    if (!entry || entry.frozenAt == null) return;
+    const now = this.getTime();
+    entry.spawnAt += Math.max(0, now - entry.frozenAt);
+    entry.frozenAt = null;
+    this.dirty = true;
+  }
+
   loop() {
     if (this.destroyed) return;
     this.raf = requestAnimationFrame(this.loop);
 
-    if (!this.enabled || !this.width || !this.height) {
-      if (!this.enabled) this.clear();
-      return;
-    }
+    if (!this.enabled || !this.width || !this.height) return;
 
     const t = Math.max(0, Number(this.getTime()) || 0);
     if (this.lastTime < 0 || t < this.lastTime - 0.35 || t - this.lastTime > 2.5) {
@@ -198,7 +257,12 @@ export class DanmakuEngine {
       this.lastTime = t;
     }
 
-    this.draw(t);
+    // 暂停时时间不变，只有 seek / 配置变化 / 悬停冻结才需要重绘
+    if (t !== this.drawnTime || this.dirty) {
+      this.draw(t);
+      this.drawnTime = t;
+      this.dirty = false;
+    }
   }
 
   spawn(item, time) {
@@ -276,16 +340,16 @@ export class DanmakuEngine {
 
     const next = [];
     for (const entry of this.active) {
-      if (time > entry.expires + 0.5) continue;
+      const entryTime = entry.frozenAt ?? time;
       let x = 0;
       let y = 0;
       if (entry.mode === 1) {
-        const elapsed = time - entry.spawnAt;
+        const elapsed = entryTime - entry.spawnAt;
         x = this.width - (elapsed / entry.travel) * (this.width + entry.width);
         if (x + entry.width < 0) continue;
         y = entry.lane * this.lineHeight + 4;
       } else {
-        const elapsed = time - entry.spawnAt;
+        const elapsed = entryTime - entry.spawnAt;
         if (elapsed > FIXED_DURATION) continue;
         x = (this.width - entry.width) / 2;
         y =

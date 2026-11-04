@@ -8,9 +8,11 @@ import {
   openPlayerWindow,
   searchSuggest,
   showMainWindow,
+  watchLaterAdd,
 } from "./api.js";
 import { icon, mountIcons } from "./icons.js";
-import { logoutUser, openLoginModal, refreshUser } from "./login.js";
+import { loadEmotePackages } from "./emotes.js";
+import { ensureLogin, logoutUser, openLoginModal, refreshUser } from "./login.js";
 import * as router from "./router.js";
 import { store } from "./store.js";
 import { confirmDialog, toast } from "./ui.js";
@@ -742,6 +744,14 @@ function initShell() {
   sidebarToggle?.addEventListener("click", toggleSidebar);
   sidebarBackdrop?.addEventListener("click", () => setSidebarOpen(false));
   themeToggle?.addEventListener("click", toggleTheme);
+  const searchFab = document.getElementById("search-fab");
+  searchFab?.addEventListener("click", () => {
+    if (searchFab.dataset.mode === "refresh") {
+      window.dispatchEvent(new CustomEvent("app:fab-refresh"));
+      return;
+    }
+    focusSearch();
+  });
 
   document.getElementById("nav-back")?.addEventListener("click", () => history.back());
   document.getElementById("nav-forward")?.addEventListener("click", () => history.forward());
@@ -759,7 +769,32 @@ function initShell() {
     }
   });
 
+  // 大部分页面不需要系统右键菜单；输入框和动态编辑器保留
+  document.addEventListener("contextmenu", (event) => {
+    if (event.target.closest("input, textarea, [contenteditable='true']")) return;
+    event.preventDefault();
+  });
+
   document.addEventListener("click", (event) => {
+    const later = event.target.closest("[data-watchlater]");
+    if (later) {
+      event.preventDefault();
+      event.stopPropagation();
+      const aid = Number(later.dataset.watchlater) || 0;
+      if (!aid) return;
+      if (!ensureLogin("登录后才能添加稍后再看")) return;
+      later.disabled = true;
+      watchLaterAdd(aid, true)
+        .then(() => {
+          later.classList.add("done");
+          toast("已加入稍后再看", "success");
+        })
+        .catch((error) => toast(errorText(error), "error"))
+        .finally(() => {
+          later.disabled = false;
+        });
+      return;
+    }
     if (event.target.closest("[data-require-login]")) {
       event.preventDefault();
       openLoginModal();
@@ -802,6 +837,14 @@ function initShell() {
     closeSearchPop();
     if (isMobile()) setSidebarOpen(false);
 
+    const fab = document.getElementById("search-fab");
+    if (fab?.dataset.mode === "refresh") {
+      delete fab.dataset.mode;
+      fab.title = "搜索 (Ctrl+K)";
+      fab.setAttribute("aria-label", "搜索");
+      fab.innerHTML = icon("search", 21);
+    }
+
     const detail = event.detail || {};
     if (detail.name === "search") {
       const q = detail.query?.get("q") || "";
@@ -832,7 +875,10 @@ router.start().catch((error) => {
 });
 
 refreshUser()
-  .then(() => syncAccount())
+  .then(() => {
+    syncAccount();
+    if (store.isLoggedIn()) loadEmotePackages().catch(() => {});
+  })
   .catch((error) => {
     // A missing or expired cookie is expected; the rest of the UI still works.
     console.warn("account refresh failed", errorText(error));

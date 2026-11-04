@@ -9,6 +9,7 @@ import {
   pageHead,
   skeletonGrid,
   toast,
+  useRefreshFab,
   videoCard,
 } from "../ui.js";
 import {
@@ -36,21 +37,18 @@ export async function render(root, ctx) {
     ${pageHead({
       title: "稍后再看",
       subtitle: "正在读取列表…",
-      actions: `<button class="btn btn-sm btn-outline" type="button" data-refresh>${icon(
-        "refresh-cw",
-        14
-      )}刷新</button>`,
     })}
     ${skeletonGrid(12)}`;
 
   let disposed = false;
   let count = 0;
 
+  const stopRefreshFab = useRefreshFab(() => ctx.refresh());
   const cleanup = () => {
     disposed = true;
+    stopRefreshFab();
     window.removeEventListener("app:auth", onAuth);
   };
-  root.querySelector("[data-refresh]")?.addEventListener("click", () => ctx.refresh());
 
   let items;
   try {
@@ -105,17 +103,11 @@ export async function render(root, ctx) {
     ${pageHead({
       title: "稍后再看",
       subtitle: subtitle(),
-      actions: `<button class="btn btn-sm btn-outline" type="button" data-refresh>${icon(
-        "refresh-cw",
-        14
-      )}刷新</button>`,
     })}
     <div class="video-grid" data-wl-grid>${items.map(cardFor).join("")}</div>`;
 
   const grid = root.querySelector("[data-wl-grid]");
   const subtitleEl = root.querySelector(".page-subtitle");
-
-  root.querySelector("[data-refresh]")?.addEventListener("click", () => ctx.refresh());
 
   const removeItem = async (button) => {
     const aid = Number(button.dataset.removeAid);

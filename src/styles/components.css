@@ -349,6 +349,8 @@
   position: relative;
   min-width: 0;
   border-radius: 10px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 250px;
 }
 
 .video-cover {
@@ -579,6 +581,50 @@
   transform: none;
 }
 
+.card-watchlater {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 8px;
+  background: rgba(15, 17, 21, 0.62);
+  color: #fff;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.15s, transform 0.15s, background 0.15s, border-color 0.15s;
+  backdrop-filter: blur(6px);
+  cursor: pointer;
+}
+
+.card-watchlater svg {
+  width: 15px;
+  height: 15px;
+}
+
+.video-card:hover .card-watchlater {
+  opacity: 1;
+  transform: none;
+}
+
+.card-watchlater:hover,
+.card-watchlater.done {
+  background: var(--brand);
+  border-color: var(--brand);
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .card-watchlater {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 /* Bangumi card ----------------------------------------------------------- */
 .bangumi-grid {
   display: grid;
@@ -588,6 +634,8 @@
 
 .bangumi-card {
   min-width: 0;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 330px;
 }
 
 .bangumi-cover {

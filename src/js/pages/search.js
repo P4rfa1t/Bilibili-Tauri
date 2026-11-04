@@ -1,5 +1,5 @@
 import { cachedTrending, search, searchTrending } from "../api.js";
-import { SEARCH_ORDERS, SEARCH_TYPES } from "../constants.js";
+import { SEARCH_DURATIONS, SEARCH_ORDERS, SEARCH_TYPES } from "../constants.js";
 import { icon } from "../icons.js";
 import { store } from "../store.js";
 import {
@@ -21,11 +21,16 @@ function normalizedOrder(value) {
   return SEARCH_ORDERS.some((item) => item.value === value) ? value : "totalrank";
 }
 
-function searchHref({ q, type, order }) {
+function normalizedDuration(value) {
+  return SEARCH_DURATIONS.some((item) => item.value === value) ? value : "all";
+}
+
+function searchHref({ q, type, order, duration = "all" }) {
   const sp = new URLSearchParams();
   sp.set("q", q);
   if (type && type !== "video") sp.set("type", type);
   if (type === "video" && order && order !== "totalrank") sp.set("order", order);
+  if (type === "video" && duration && duration !== "all") sp.set("duration", duration);
   return `#/search?${sp.toString()}`;
 }
 
@@ -164,6 +169,7 @@ export async function render(root, ctx) {
 
   const type = normalizedType(ctx.query.get("type") || "video");
   const order = normalizedOrder(ctx.query.get("order") || "totalrank");
+  const duration = normalizedDuration(ctx.query.get("duration") || "all");
   const typeLabel = SEARCH_TYPES.find((item) => item.value === type)?.label || "视频";
 
   const tabs = SEARCH_TYPES.map(
@@ -172,6 +178,7 @@ export async function render(root, ctx) {
         q,
         type: item.value,
         order,
+        duration,
       })}">${escapeHtml(item.label)}</a>`
   ).join("");
 
@@ -202,6 +209,15 @@ export async function render(root, ctx) {
                   (item) =>
                     `<option value="${item.value}"${
                       item.value === order ? " selected" : ""
+                    }>${escapeHtml(item.label)}</option>`
+                ).join("")}
+              </select>
+              <span class="hint">时长</span>
+              <select class="select" data-duration aria-label="视频时长">
+                ${SEARCH_DURATIONS.map(
+                  (item) =>
+                    `<option value="${item.value}"${
+                      item.value === duration ? " selected" : ""
                     }>${escapeHtml(item.label)}</option>`
                 ).join("")}
               </select>
@@ -261,7 +277,13 @@ export async function render(root, ctx) {
 
   const loadMore = async () => {
     if (disposed) return false;
-    const data = await search(q, page + 1, type, type === "video" ? order : "totalrank");
+    const data = await search(
+      q,
+      page + 1,
+      type,
+      type === "video" ? order : "totalrank",
+      type === "video" ? duration : "all"
+    );
     if (disposed || ctx.signal.aborted) return false;
     page = data.page || page + 1;
     paintItems(data);
@@ -274,7 +296,13 @@ export async function render(root, ctx) {
   };
 
   try {
-    const data = await search(q, 1, type, type === "video" ? order : "totalrank");
+    const data = await search(
+      q,
+      1,
+      type,
+      type === "video" ? order : "totalrank",
+      type === "video" ? duration : "all"
+    );
     if (disposed || ctx.signal.aborted) return () => {};
     page = data.page || 1;
     const total = Number(data.total) || 0;
@@ -326,13 +354,17 @@ export function warmTrending() {
 
 // Handlers that live on the page shell rather than a specific result list.
 document.addEventListener("change", (event) => {
-  const select = event.target.closest("[data-order]");
+  const select = event.target.closest("[data-order], [data-duration]");
   if (!select) return;
-  const order = normalizedOrder(select.value);
-  const q = (new URLSearchParams(location.hash.split("?")[1] || "").get("q") || "").trim();
+  const params = new URLSearchParams(location.hash.split("?")[1] || "");
+  const q = (params.get("q") || "").trim();
   if (!q) return;
-  const type = normalizedType(
-    new URLSearchParams(location.hash.split("?")[1] || "").get("type") || "video"
-  );
-  location.hash = searchHref({ q, type, order }).slice(1);
+  const type = normalizedType(params.get("type") || "video");
+  const order = select.hasAttribute("data-order")
+    ? normalizedOrder(select.value)
+    : normalizedOrder(params.get("order") || "totalrank");
+  const duration = select.hasAttribute("data-duration")
+    ? normalizedDuration(select.value)
+    : normalizedDuration(params.get("duration") || "all");
+  location.hash = searchHref({ q, type, order, duration }).slice(1);
 });

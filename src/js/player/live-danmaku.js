@@ -9,6 +9,7 @@
 import { liveDanmuConf, liveDanmuHistory } from "../api.js";
 import { store } from "../store.js";
 import { DanmakuEngine } from "./danmaku.js";
+import { DanmakuHover } from "./danmaku-hover.js";
 
 const HEADER = 16;
 const OP_HEARTBEAT = 2;
@@ -56,12 +57,14 @@ function hexColor(value) {
 }
 
 export class LiveDanmaku {
-  constructor(canvas, { roomId, onStatus, onChat, onPopularity } = {}) {
+  constructor(canvas, { roomId, onStatus, onChat, onPopularity, onOnline, onCopied } = {}) {
     this.canvas = canvas;
     this.roomId = Number(roomId) || 0;
     this.onStatus = typeof onStatus === "function" ? onStatus : null;
     this.onChat = typeof onChat === "function" ? onChat : null;
     this.onPopularity = typeof onPopularity === "function" ? onPopularity : null;
+    this.onOnline = typeof onOnline === "function" ? onOnline : null;
+    this.onCopied = typeof onCopied === "function" ? onCopied : null;
 
     this.startedAt = performance.now();
     this.engine = new DanmakuEngine(canvas, { getTime: () => this.now() });
@@ -71,6 +74,19 @@ export class LiveDanmaku {
       speed: store.get("danmakuSpeed"),
       area: store.get("danmakuArea"),
     });
+    this.hover = null;
+    const shell = canvas.parentElement;
+    const button = shell?.querySelector("[data-live-danmaku-copy]");
+    if (shell && button) {
+      this.hover = new DanmakuHover({
+        engine: this.engine,
+        container: shell,
+        button,
+        ignoreSelector: ".live-player-overlay, .live-buffering, .live-quality",
+        bottomInset: 64,
+        onCopied: (ok, text) => this.onCopied?.(ok, text),
+      });
+    }
 
     this.enabled = store.get("danmaku") !== false;
     this.engine.setEnabled(this.enabled);
@@ -111,6 +127,7 @@ export class LiveDanmaku {
   setEnabled(enabled) {
     this.enabled = Boolean(enabled);
     this.engine.setEnabled(this.enabled);
+    if (!this.enabled) this.hover?.hide();
   }
 
   /** 往引擎里塞一条弹幕。实时弹幕时间单调递增，直接追加即可。 */
@@ -132,6 +149,7 @@ export class LiveDanmaku {
     }
     this.count += 1;
     if (items.length > MAX_QUEUE) {
+      this.hover?.hide();
       items.splice(0, items.length - MAX_QUEUE);
       this.engine.seek(this.now());
     }
@@ -175,6 +193,7 @@ export class LiveDanmaku {
         .filter((item) => item.content)
         .sort((a, b) => a.time - b.time);
       // setData 会重置播放指针，所以只在补历史这一下用
+      this.hover?.hide();
       this.engine.setData(merged);
     } catch (_) {
       /* 历史弹幕只是补充，失败了实时弹幕照样能用 */
@@ -183,12 +202,16 @@ export class LiveDanmaku {
 
   async inflate(body) {
     if (typeof DecompressionStream === "undefined") return null;
-    try {
-      const stream = new Blob([body]).stream().pipeThrough(new DecompressionStream("deflate"));
-      return await new Response(stream).arrayBuffer();
-    } catch (_) {
-      return null;
+    // 直播协议历史上用过 zlib 与 raw deflate 两种包装，逐一尝试
+    for (const format of ["deflate", "deflate-raw"]) {
+      try {
+        const stream = new Blob([body]).stream().pipeThrough(new DecompressionStream(format));
+        return await new Response(stream).arrayBuffer();
+      } catch (_) {
+        /* 尝试下一种格式 */
+      }
     }
+    return null;
   }
 
   async handleFrame(buffer) {
@@ -216,12 +239,6 @@ export class LiveDanmaku {
         const view = new DataView(packet.body);
         if (packet.body.byteLength >= 4) this.onPopularity?.(view.getUint32(0));
       }
-    }
-  }
-
-  notifyCount() {
-    if (this.onStatus && this.status === "live") {
-      this.onStatus("live", `弹幕已连接 · 已收到 ${this.count} 条`);
     }
   }
 
@@ -259,7 +276,6 @@ export class LiveDanmaku {
           isAdmin: Number(info[7]) === 1 || Number(user[2]) === 1,
         });
       }
-      this.notifyCount();
       return;
     }
     if (cmd === "SUPER_CHAT_MESSAGE" && message.data) {
@@ -291,10 +307,7 @@ export class LiveDanmaku {
       return;
     }
     if (cmd === "ONLINE_RANK_COUNT" && message.data) {
-      this.onChat?.({
-        kind: "online",
-        text: `在线观看 ${Number(message.data.count) || 0}`,
-      });
+      this.onOnline?.(Number(message.data.count) || 0);
     }
   }
 
@@ -320,6 +333,11 @@ export class LiveDanmaku {
     const host = conf?.host || "broadcastlv.chat.bilibili.com";
     const port = Number(conf?.wss_port) || 443;
     const token = conf?.token || "";
+    if (!token) {
+      this.setStatus("error", "弹幕服务器凭据无效");
+      this.scheduleRetry();
+      return;
+    }
 
     let socket = null;
     try {
@@ -393,6 +411,7 @@ export class LiveDanmaku {
 
   destroy() {
     this.destroyed = true;
+    this.hover?.destroy();
     clearInterval(this.heartbeat);
     clearTimeout(this.retryTimer);
     this.heartbeat = 0;

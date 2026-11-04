@@ -59,6 +59,50 @@ pub struct BangumiCard {
     pub link: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FilterValue {
+    pub keyword: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FilterGroup {
+    pub field: String,
+    pub name: String,
+    pub values: Vec<FilterValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SortOption {
+    pub value: i64,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BangumiFilterSet {
+    pub filters: Vec<FilterGroup>,
+    pub orders: Vec<SortOption>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DynamicEmote {
+    pub text: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DynamicEmotePackage {
+    pub name: String,
+    pub emotes: Vec<DynamicEmote>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DynamicUpload {
+    pub url: String,
+    pub width: i64,
+    pub height: i64,
+}
+
 /// 搜索结果（根据 kind 返回不同字段）
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SearchResult {
@@ -305,6 +349,10 @@ pub struct Episode {
     pub cover: String,
     pub duration: i64,
     pub badge: String,
+    pub skip_op_start: i64,
+    pub skip_op_end: i64,
+    pub skip_ed_start: i64,
+    pub skip_ed_end: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -405,6 +453,10 @@ pub struct DynamicItem {
     pub forward: i64,
     pub comment: i64,
     pub like: i64,
+    pub liked: bool,
+    /// 动态评论使用的 oid 与 type（basic.comment_id_str / comment_type）
+    pub comment_id: String,
+    pub comment_type: i64,
     pub archive: Option<DynamicArchive>,
     pub live: Option<DynamicLive>,
     /// 转发时被转发的原动态
@@ -418,6 +470,12 @@ pub struct DynamicPage {
     pub offset: String,
     pub has_more: bool,
     pub update_num: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct DynamicLikeResult {
+    pub count: i64,
+    pub liked: bool,
 }
 
 // ---------------- 消息 ----------------
@@ -442,6 +500,12 @@ pub struct MessageItem {
     pub content: String,
     pub uri: String,
     pub image: String,
+    pub cover: String,
+    pub source_id: i64,
+    pub subject_id: i64,
+    pub target_id: i64,
+    pub business_id: i64,
+    pub root_id: i64,
     pub time: i64,
     pub count: i64,
 }

@@ -258,6 +258,12 @@ export async function render(root, ctx) {
         "danmaku",
         store.get("danmaku")
       )}
+      ${switchRow(
+        "高能进度条",
+        "在进度条上方显示弹幕密度曲线，快速定位高能片段。",
+        "danmakuHeat",
+        store.get("danmakuHeat") !== false
+      )}
       ${rangeRow(
         "不透明度",
         "弹幕文字的不透明度。",

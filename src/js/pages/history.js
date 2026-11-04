@@ -8,6 +8,7 @@ import {
   loginRequiredHTML,
   pageHead,
   skeletonRows,
+  useRefreshFab,
 } from "../ui.js";
 import {
   dayKey,
@@ -136,11 +137,7 @@ export async function render(root, ctx) {
     ${pageHead({
       title: "历史记录",
       subtitle: "正在读取观看记录…",
-      actions: `<button class="btn btn-sm btn-outline" type="button" data-refresh>${icon(
-        "refresh-cw",
-        14
-      )}刷新</button>
-      <button class="btn btn-sm btn-outline danger" type="button" data-clear-history>${icon(
+      actions: `<button class="btn btn-sm btn-outline danger" type="button" data-clear-history>${icon(
         "trash-2",
         14
       )}清空历史</button>`,
@@ -157,6 +154,7 @@ export async function render(root, ctx) {
   let cursorViewAt = 0;
   let tab = "all";
 
+  const stopRefreshFab = useRefreshFab(() => ctx.refresh());
   const list = root.querySelector("[data-history-list]");
   const more = root.querySelector("[data-history-more]");
   const subtitle = root.querySelector(".page-subtitle");
@@ -165,10 +163,9 @@ export async function render(root, ctx) {
     disposed = true;
     loader?.remove();
     loader = null;
+    stopRefreshFab();
     window.removeEventListener("app:auth", onAuth);
   };
-
-  root.querySelector("[data-refresh]")?.addEventListener("click", () => ctx.refresh());
 
   root.querySelector("[data-clear-history]")?.addEventListener("click", async () => {
     if (!window.confirm("确定要清空全部历史记录吗？此操作会删除 B 站账号内的所有观看历史，且不可恢复。")) {

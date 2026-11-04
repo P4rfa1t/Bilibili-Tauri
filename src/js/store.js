@@ -21,6 +21,7 @@ const DEFAULTS = {
   speed: 1,
   volume: 0.82,
   danmaku: true,
+  danmakuHeat: true,
   danmakuOpacity: 0.9,
   danmakuSize: 25,
   danmakuSpeed: 8,
@@ -76,6 +77,7 @@ function sanitize(raw) {
   out.speed = clampNumber(raw.speed, 0.5, 2, DEFAULTS.speed);
   out.volume = clampNumber(raw.volume, 0, 1, DEFAULTS.volume);
   out.danmaku = raw.danmaku !== false;
+  out.danmakuHeat = raw.danmakuHeat !== false;
   out.danmakuOpacity = clampNumber(raw.danmakuOpacity, 0.1, 1, DEFAULTS.danmakuOpacity);
   out.danmakuSize = clampNumber(raw.danmakuSize, 14, 40, DEFAULTS.danmakuSize);
   out.danmakuSpeed = clampNumber(raw.danmakuSpeed, 4, 14, DEFAULTS.danmakuSpeed);

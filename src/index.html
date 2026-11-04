@@ -79,10 +79,6 @@
         </div>
 
         <div class="tb-right">
-          <a class="icon-btn msg-btn" id="dyn-btn" href="#/home?channel=dynamic" title="动态" aria-label="动态">
-            <span data-icon="activity"></span>
-            <span class="msg-dot hidden" id="dyn-dot"></span>
-          </a>
           <a class="icon-btn msg-btn" id="msg-btn" href="#/messages" title="消息" aria-label="消息">
             <span data-icon="bell"></span>
             <span class="msg-dot hidden" id="msg-dot"></span>
@@ -145,6 +141,10 @@
             </a>
 
             <div class="nav-spacer"></div>
+            <a class="nav-item" href="#/home?channel=dynamic" data-nav="dynamic" id="dyn-btn" title="动态" aria-label="动态">
+              <span class="nav-icon" data-icon="activity"></span><span class="nav-label">动态</span>
+              <span class="msg-dot hidden" id="dyn-dot"></span>
+            </a>
             <a class="nav-item" href="#/settings" data-nav="settings">
               <span class="nav-icon" data-icon="settings"></span><span class="nav-label">设置</span>
             </a>
@@ -158,6 +158,10 @@
         </main>
       </div>
     </div>
+
+    <button class="search-fab" id="search-fab" type="button" title="搜索 (Ctrl+K)" aria-label="搜索">
+      <span data-icon="search"></span>
+    </button>
 
     <div id="modal-root"></div>
     <div id="toast-root" class="toast-root" aria-live="polite"></div>
