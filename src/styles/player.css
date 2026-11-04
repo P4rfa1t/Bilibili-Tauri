@@ -43,6 +43,47 @@
   pointer-events: none;
 }
 
+.danmaku-hover {
+  position: absolute;
+  z-index: 6;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+}
+
+.danmaku-hover[hidden] {
+  display: none;
+}
+
+.danmaku-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(15, 17, 21, 0.84);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(8px);
+  transition: background 0.14s, border-color 0.14s;
+}
+
+.danmaku-copy:hover {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.danmaku-copy svg {
+  width: 14px;
+  height: 14px;
+}
+
 .subtitle-layer {
   position: absolute;
   left: 50%;
@@ -99,6 +140,32 @@
 
 .player-bigplay.hidden {
   display: none !important;
+}
+
+.player-skip {
+  position: absolute;
+  right: 18px;
+  top: 18px;
+  z-index: 7;
+  padding: 6px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 8px;
+  background: rgba(15, 17, 21, 0.62);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition: background 0.14s, border-color 0.14s;
+}
+
+.player-skip:hover {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+.player-skip[hidden] {
+  display: none;
 }
 
 .player-loading {
@@ -236,12 +303,30 @@
   left: 0;
   right: 0;
   top: 50%;
+  z-index: 1;
   height: 3px;
   border-radius: 3px;
   background: rgba(255, 255, 255, 0.24);
   transform: translateY(-50%);
   transition: height 0.12s ease;
   overflow: hidden;
+}
+
+.progress-heat {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 50%;
+  z-index: 0;
+  width: 100%;
+  height: 11px;
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.progress:hover .progress-heat {
+  opacity: 0.9;
 }
 
 .progress:hover .progress-track,
@@ -269,6 +354,7 @@
   position: absolute;
   top: 50%;
   left: 0;
+  z-index: 3;
   width: 13px;
   height: 13px;
   border-radius: 50%;
@@ -288,6 +374,7 @@
   position: absolute;
   bottom: 24px;
   left: 0;
+  z-index: 4;
   padding: 3px 7px;
   border-radius: 5px;
   background: rgba(0, 0, 0, 0.82);

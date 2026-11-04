@@ -48,7 +48,7 @@ export async function render(root, ctx) {
 
   const subCtx = {
     ...ctx,
-    params: {},
+    params: { channel },
     query,
     refresh: () => ctx.refresh(),
   };

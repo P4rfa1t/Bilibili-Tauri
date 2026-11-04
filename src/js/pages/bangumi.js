@@ -1,10 +1,12 @@
 import {
   bangumiDetail,
+  bangumiFilters,
   bangumiList,
   danmaku as fetchDanmaku,
   openExternal,
   pgcPlayInfo,
 } from "../api.js";
+import { channelHref } from "../channels.js";
 import { BANGUMI_TYPES } from "../constants.js";
 import { icon } from "../icons.js";
 import { orderStreams, pgcPlayOptions } from "../media.js";
@@ -17,18 +19,301 @@ import {
   errorState,
   skeletonGrid,
   toast,
+  useRefreshFab,
 } from "../ui.js";
 import {
   errorText,
+  escapeAttr,
   escapeHtml,
   formatCount,
   formatDuration,
   imgTag,
 } from "../utils.js";
 
-function normalizeType(value) {
+/** 追番与影视共用一套列表页，但分类和筛选项完全分开。 */
+const GROUP_TYPES = {
+  bangumi: [1, 4],
+  film: [2, 5, 3, 7],
+};
+
+const TAB_TYPES = {
+  bangumi: [],
+  film: [2, 5, 3, 7],
+};
+
+const REGION_FALLBACK = [
+  { keyword: "-1", name: "全部" },
+  { keyword: "2", name: "日本" },
+  { keyword: "3", name: "美国" },
+  { keyword: "cn", name: "中国" },
+];
+
+const GROUP_META = {
+  bangumi: {
+    title: "追番库",
+    sub: "浏览正版番剧与国创内容。",
+    noun: "番剧",
+  },
+  film: {
+    title: "影视库",
+    sub: "浏览电影、纪录片、电视剧与综艺。",
+    noun: "影视",
+  },
+};
+
+const FILTER_LABELS = {
+  area: "地区",
+  style_id: "风格",
+  season_version: "版本类型",
+  season_status: "付费类型",
+  year: "全部年份",
+  release_date: "年份",
+  is_finish: "完结状态",
+  spoken_language_type: "配音类型",
+  copyright: "版权类型",
+  season_month: "全部季度",
+};
+
+const FILTER_KEYS = Object.keys(FILTER_LABELS);
+const FILTER_FIELDS = {
+  bangumi: ["style_id", "season_version", "season_status"],
+  film: ["area", "style_id", "release_date", "year", "season_status"],
+};
+const EXTRA_FIELDS = [
+  "spoken_language_type",
+  "copyright",
+  "is_finish",
+  "year",
+  "season_month",
+];
+const COLLAPSED_CHIPS = 12;
+const filterCache = new Map();
+
+function groupChannel(ctx) {
+  return ctx.params.channel === "film" ? "film" : "bangumi";
+}
+
+function groupTypes(channel) {
+  return GROUP_TYPES[channel] || GROUP_TYPES.bangumi;
+}
+
+function normalizeType(value, channel) {
+  const types = groupTypes(channel);
   const n = Number(value);
-  return BANGUMI_TYPES.some((item) => item.value === n) ? n : 1;
+  return types.includes(n) ? n : types[0];
+}
+
+function typeLabel(value) {
+  return BANGUMI_TYPES.find((item) => item.value === value)?.label || "番剧";
+}
+
+function readFilters(query) {
+  const out = {};
+  for (const key of FILTER_KEYS) {
+    const value = query.get(key);
+    if (value) out[key] = value;
+  }
+  if (!out.order) out.order = "1";
+  return out;
+}
+
+function filtersForApi(filters) {
+  const out = {};
+  for (const key of [...FILTER_KEYS, "order"]) {
+    const value = filters[key];
+    if (value && value !== "-1") out[key] = value;
+  }
+  return out;
+}
+
+function filtersHref(channel, seasonType, filters) {
+  return channelHref(channel, { type: seasonType, ...filtersForApi(filters) });
+}
+
+function hasActiveFilters(filters) {
+  return Object.entries(filters).some(([key, value]) =>
+    key === "order" ? String(value) !== "1" : Boolean(value) && value !== "-1"
+  );
+}
+
+function getFilterSet(seasonType) {
+  if (!filterCache.has(seasonType)) {
+    filterCache.set(
+      seasonType,
+      bangumiFilters(seasonType).catch((error) => {
+        filterCache.delete(seasonType);
+        throw error;
+      })
+    );
+  }
+  return filterCache.get(seasonType);
+}
+
+function filterChipName(condition, field, value) {
+  const group = condition?.filters?.find((item) => item.field === field);
+  return (
+    group?.values?.find((item) => String(item.keyword) === String(value))?.name ||
+    String(value)
+  );
+}
+
+function filterRowHtml(label, field, values, filters) {
+  const collapsed = values.length > COLLAPSED_CHIPS;
+  const chips = values
+    .map((item) => {
+      const active =
+        field === "order"
+          ? String(filters.order || "1") === String(item.keyword)
+          : String(filters[field] ?? "-1") === String(item.keyword);
+      return `<button class="chip${active ? " active" : ""}" type="button" data-filter="${escapeHtml(
+        field
+      )}" data-value="${escapeHtml(item.keyword)}">${escapeHtml(item.name)}</button>`;
+    })
+    .join("");
+  return `<div class="filter-row${collapsed ? " collapsed" : ""}" data-filter-row>
+    <span class="filter-label">${escapeHtml(label)}</span>
+    <span class="filter-values">${chips}</span>
+    ${
+      collapsed
+        ? '<button class="filter-more" type="button" data-filter-more>查看全部</button>'
+        : ""
+    }
+  </div>`;
+}
+
+function extraFields(condition, channel) {
+  const core = new Set(FILTER_FIELDS[channel] || FILTER_FIELDS.bangumi);
+  return EXTRA_FIELDS.filter(
+    (field) =>
+      !core.has(field) && condition?.filters?.some((group) => group.field === field)
+  );
+}
+
+function buildRegionValues(condition) {
+  const group = condition?.filters?.find((item) => item.field === "area");
+  const values = group?.values?.length
+    ? group.values.map((item) => ({ keyword: item.keyword, name: item.name }))
+    : REGION_FALLBACK.filter((item) => item.keyword !== "cn");
+  const existing = values.findIndex((item) => item.keyword === "cn");
+  if (existing >= 0) values.splice(existing, 1);
+  const allIndex = values.findIndex((item) => item.keyword === "-1");
+  values.splice(allIndex >= 0 ? allIndex + 1 : 0, 0, {
+    keyword: "cn",
+    name: "中国",
+  });
+  return values;
+}
+
+function regionRowHtml(values, active) {
+  const chips = values
+    .map(
+      (item) =>
+        `<button class="chip${
+          String(item.keyword) === String(active) ? " active" : ""
+        }" type="button" data-region="${escapeAttr(item.keyword)}">${escapeHtml(
+          item.name
+        )}</button>`
+    )
+    .join("");
+  return `<div class="filter-row" data-filter-row>
+    <span class="filter-label">地区</span>
+    <span class="filter-values">${chips}</span>
+  </div>`;
+}
+
+function filtersHtml(
+  condition,
+  channel,
+  filters,
+  showMore = false,
+  regionValues = [],
+  seasonType = 1
+) {
+  const groups = new Map((condition?.filters || []).map((group) => [group.field, group]));
+  const rows = [];
+  const orders = (condition?.orders || []).map((item) => ({
+    keyword: String(item.value),
+    name: item.label,
+  }));
+  if (orders.length) rows.push(filterRowHtml("排序", "order", orders, filters));
+
+  if (channel === "bangumi" && regionValues.length) {
+    rows.push(
+      regionRowHtml(
+        regionValues,
+        seasonType === 4 ? "cn" : filters.area ?? "-1"
+      )
+    );
+  }
+
+  let yearField = "";
+  for (const field of FILTER_FIELDS[channel] || FILTER_FIELDS.bangumi) {
+    if (field === "release_date" || field === "year") yearField = field;
+  }
+  const used = new Set();
+  for (const field of FILTER_FIELDS[channel] || FILTER_FIELDS.bangumi) {
+    if (field === "year" && used.has("year")) continue;
+    if (field === "year" && yearField === "release_date" && groups.has("release_date")) {
+      continue;
+    }
+    const group = groups.get(field);
+    if (!group) continue;
+    if (field === "release_date" || field === "year") used.add("year");
+    rows.push(
+      filterRowHtml(FILTER_LABELS[field] || group.name || field, field, group.values, filters)
+    );
+  }
+  if (showMore) {
+    for (const field of extraFields(condition, channel)) {
+      const group = groups.get(field);
+      if (!group) continue;
+      rows.push(
+        filterRowHtml(FILTER_LABELS[field] || group.name || field, field, group.values, filters)
+      );
+    }
+  }
+  return rows.join("");
+}
+
+function shellHtml(channel, seasonType, filters) {
+  const meta = GROUP_META[channel];
+  const tabTypes = TAB_TYPES[channel] || groupTypes(channel);
+  const tabs = tabTypes
+    .map((value) => {
+      const active =
+        value === seasonType ||
+        (channel === "bangumi" && value === 1 && seasonType === 4)
+          ? " active"
+          : "";
+      return `<a class="chip${active}" href="${channelHref(channel, {
+        type: value,
+      })}">${escapeHtml(typeLabel(value))}</a>`;
+    })
+    .join("");
+  return `
+    <div class="bangumi-list-hero">
+      <div>
+        <h1 class="bangumi-list-title">${meta.title}</h1>
+        <p class="bangumi-list-sub" data-list-sub>${meta.sub}</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-sm btn-outline hidden" type="button" data-more-filters>
+          更多筛选 ${icon("chevron-down", 14)}
+        </button>
+        <button class="btn btn-sm btn-outline hidden" type="button" data-clear-filters>
+          ${icon("list-video", 14)}查看全部
+        </button>
+      </div>
+    </div>
+    ${tabs ? `<div class="chip-row" style="margin-bottom:14px">${tabs}</div>` : ""}
+    <div class="library-filters" data-filters>
+      <div class="filter-loading"><span class="spinner"></span>正在加载筛选条件…</div>
+    </div>
+    <div class="library-result-head">
+      <span data-result-total>正在加载…</span>
+      <span class="hint" data-active-filters></span>
+    </div>
+    <div data-bangumi-results>${skeletonGrid(12, { bangumi: true })}</div>`;
 }
 
 function resumeSeconds(play) {
@@ -41,40 +326,76 @@ function resumeSeconds(play) {
 // ------------------------------------------------------------------- list
 
 async function renderList(root, ctx) {
-  const seasonType = normalizeType(ctx.query.get("type"));
-  const typeLabel =
-    BANGUMI_TYPES.find((item) => item.value === seasonType)?.label || "番剧";
+  const channel = groupChannel(ctx);
+  const seasonType = normalizeType(ctx.query.get("type"), channel);
+  const filters = readFilters(ctx.query);
+  const meta = GROUP_META[channel];
 
-  root.innerHTML = `
-    <div class="bangumi-list-hero">
-      <div>
-        <h1 class="bangumi-list-title">番剧库</h1>
-        <p class="bangumi-list-sub" data-list-sub>浏览正版番剧、国创、电影、纪录片与综艺。</p>
-      </div>
-      <button class="btn btn-sm btn-outline" type="button" data-refresh>
-        ${icon("refresh-cw", 14)}刷新
-      </button>
-    </div>
-    <div class="chip-row" style="margin-bottom:18px">
-      ${BANGUMI_TYPES.map(
-        (item) =>
-          `<a class="chip${item.value === seasonType ? " active" : ""}" href="#/bangumi?type=${
-            item.value
-          }">${escapeHtml(item.label)}</a>`
-      ).join("")}
-    </div>
-    <div data-bangumi-results>${skeletonGrid(12, { bangumi: true })}</div>`;
+  // 防止从旧链接进入另一个分组时标签与内容不一致
+  if (ctx.query.get("type") && String(ctx.query.get("type")) !== String(seasonType)) {
+    history.replaceState(null, "", filtersHref(channel, seasonType, filters));
+  }
+
+  root.innerHTML = shellHtml(channel, seasonType, filters);
 
   const results = root.querySelector("[data-bangumi-results]");
+  const filtersEl = root.querySelector("[data-filters]");
   const sub = root.querySelector("[data-list-sub]");
+  const totalEl = root.querySelector("[data-result-total]");
+  const activeEl = root.querySelector("[data-active-filters]");
+  const clearBtn = root.querySelector("[data-clear-filters]");
+  const moreBtn = root.querySelector("[data-more-filters]");
+
   let disposed = false;
   let page = 0;
   let grid = null;
   let loader = null;
+  let condition = null;
+  let regionValues = [];
+  let loadingMore = false;
+  let loadSeq = 0;
+  let lastTotal = 0;
+  let showMore = EXTRA_FIELDS.some(
+    (field) => filters[field] && filters[field] !== "-1"
+  );
+  const stopRefreshFab = useRefreshFab(() => ctx.refresh());
 
-  root.querySelector("[data-refresh]")?.addEventListener("click", () => ctx.refresh());
+  const updateUrl = () => {
+    history.replaceState(null, "", filtersHref(channel, seasonType, filters));
+  };
 
-  const append = (items) => {
+  const paintFilters = () => {
+    if (!filtersEl) return;
+    filtersEl.innerHTML = condition
+      ? filtersHtml(condition, channel, filters, showMore, regionValues, seasonType)
+      : '<div class="filter-loading"><span class="spinner"></span>正在加载筛选条件…</div>';
+    const extras = extraFields(condition, channel);
+    if (moreBtn) {
+      moreBtn.classList.toggle("hidden", !extras.length);
+      moreBtn.innerHTML = `更多筛选 ${icon(showMore ? "chevron-up" : "chevron-down", 14)}`;
+      moreBtn.setAttribute("aria-expanded", showMore ? "true" : "false");
+    }
+    clearBtn?.classList.toggle("hidden", !hasActiveFilters(filters));
+  };
+
+  const paintSummary = (total = lastTotal) => {
+    lastTotal = Number(total) || 0;
+    if (sub) {
+      sub.textContent = lastTotal
+        ? `共收录 ${formatCount(lastTotal)} 部${meta.noun}，按当前筛选排序。`
+        : meta.sub;
+    }
+    if (totalEl) totalEl.textContent = lastTotal ? `共 ${formatCount(lastTotal)} 部` : "";
+    if (activeEl) {
+      const active = Object.entries(filters)
+        .filter(([key, value]) => key !== "order" && value && value !== "-1")
+        .map(([key, value]) => `${FILTER_LABELS[key] || key}：${filterChipName(condition, key, value)}`);
+      if (channel === "bangumi" && seasonType === 4) active.unshift("地区：中国");
+      activeEl.textContent = active.join(" · ");
+    }
+  };
+
+  function append(items) {
     if (!items.length) return;
     if (!grid) {
       grid = document.createElement("div");
@@ -82,53 +403,140 @@ async function renderList(root, ctx) {
       results.append(grid);
     }
     grid.insertAdjacentHTML("beforeend", items.map((item) => bangumiCard(item)).join(""));
-  };
+  }
 
-  const loadMore = async () => {
-    if (disposed) return false;
-    const data = await bangumiList(page + 1, seasonType);
-    if (disposed || ctx.signal.aborted) return false;
-    page = data.page || page + 1;
-    append(data.items || []);
-    return Boolean(data.has_more);
-  };
-
-  try {
-    const data = await bangumiList(1, seasonType);
-    if (disposed || ctx.signal.aborted) return () => {};
-    page = data.page || 1;
-    const items = data.items || [];
-    if (sub) {
-      sub.textContent = data.total
-        ? `共收录 ${formatCount(data.total)} 部${typeLabel}，按热门排序。`
-        : `浏览正版${typeLabel}内容。`;
+  async function loadMore() {
+    if (disposed || loadingMore) return false;
+    loadingMore = true;
+    try {
+      const data = await bangumiList(page + 1, seasonType, filtersForApi(filters));
+      if (disposed || ctx.signal.aborted) return false;
+      page = data.page || page + 1;
+      append(data.items || []);
+      return Boolean(data.has_more);
+    } catch (error) {
+      if (!disposed) toast(errorText(error), "error");
+      return false;
+    } finally {
+      loadingMore = false;
     }
-    results.innerHTML = "";
-    if (!items.length) {
-      results.innerHTML = emptyState(
-        "暂时没有内容",
-        "换一个分类，或稍后再来看看。",
-        `<button class="btn btn-primary" type="button" data-empty-retry>重新加载</button>`,
-        "tv"
-      );
-      results
-        .querySelector("[data-empty-retry]")
-        ?.addEventListener("click", () => ctx.refresh());
-    } else {
+  }
+
+  async function loadFirst() {
+    if (disposed) return;
+    const token = ++loadSeq;
+    loader?.remove();
+    loader = null;
+    grid = null;
+    results.innerHTML = skeletonGrid(12, { bangumi: true });
+    try {
+      const data = await bangumiList(1, seasonType, filtersForApi(filters));
+      if (disposed || ctx.signal.aborted || token !== loadSeq) return;
+      page = data.page || 1;
+      const items = data.items || [];
+      results.innerHTML = "";
+      paintSummary(data.total);
+      if (!items.length) {
+        results.innerHTML = emptyState(
+          "没有符合条件的内容",
+          "可以换个筛选条件，或查看全部内容。",
+          `<button class="btn btn-primary" type="button" data-empty-retry>查看全部</button>`,
+          "tv"
+        );
+        results.querySelector("[data-empty-retry]")?.addEventListener("click", () => {
+          resetFilters();
+        });
+        return;
+      }
       append(items);
       if (data.has_more) loader = createInfiniteLoader(results, loadMore);
+    } catch (error) {
+      if (disposed || ctx.signal.aborted || token !== loadSeq) return;
+      results.innerHTML = errorState(error);
+      results.querySelector("[data-retry]")?.addEventListener("click", () => loadFirst());
+      if (totalEl) totalEl.textContent = "加载失败";
     }
-  } catch (error) {
-    if (disposed || ctx.signal.aborted) return () => {};
-    results.innerHTML = errorState(error);
-    results.querySelector("[data-retry]")?.addEventListener("click", () => ctx.refresh());
-    if (sub) sub.textContent = "番剧列表加载失败";
   }
+
+  function resetFilters() {
+    for (const key of Object.keys(filters)) delete filters[key];
+    filters.order = "1";
+    showMore = false;
+    paintFilters();
+    updateUrl();
+    loadFirst();
+  }
+
+  function applyFilter(field, value) {
+    if (field === "order") filters.order = String(value || "1");
+    else if (!value || value === "-1") delete filters[field];
+    else filters[field] = String(value);
+    paintFilters();
+    updateUrl();
+    loadFirst();
+  }
+
+  clearBtn?.addEventListener("click", resetFilters);
+  moreBtn?.addEventListener("click", () => {
+    showMore = !showMore;
+    paintFilters();
+  });
+  filtersEl?.addEventListener("click", (event) => {
+    const region = event.target.closest("[data-region]");
+    if (region) {
+      event.preventDefault();
+      const value = region.dataset.region || "-1";
+      const params = { type: value === "cn" ? 4 : 1 };
+      if (value !== "cn" && value !== "-1") params.area = value;
+      location.hash = channelHref(channel, params);
+      return;
+    }
+    const chip = event.target.closest("[data-filter]");
+    if (chip) {
+      applyFilter(chip.dataset.filter, chip.dataset.value);
+      return;
+    }
+    const more = event.target.closest("[data-filter-more]");
+    if (!more) return;
+    const row = more.closest("[data-filter-row]");
+    if (!row) return;
+    row.classList.toggle("collapsed");
+    more.textContent = row.classList.contains("collapsed") ? "查看全部" : "收起";
+  });
+
+  getFilterSet(seasonType)
+    .then((value) => {
+      if (disposed || ctx.signal.aborted) return;
+      condition = value;
+      paintFilters();
+      paintSummary();
+      if (channel === "bangumi") {
+        getFilterSet(1)
+          .then((base) => {
+            if (disposed || ctx.signal.aborted) return;
+            regionValues = buildRegionValues(base);
+            paintFilters();
+          })
+          .catch(() => {
+            if (disposed || ctx.signal.aborted) return;
+            regionValues = buildRegionValues(null);
+            paintFilters();
+          });
+      }
+    })
+    .catch(() => {
+      if (disposed || !filtersEl) return;
+      filtersEl.innerHTML =
+        '<div class="filter-loading">筛选条件加载失败，可以直接浏览内容。</div>';
+    });
+
+  loadFirst();
 
   return () => {
     disposed = true;
     loader?.remove();
     loader = null;
+    stopRefreshFab();
   };
 }
 
@@ -141,6 +549,21 @@ function episodeLabel(episode, index) {
 function episodeSub(episode) {
   if (episode?.long_title) return episode.long_title;
   return episode?.duration ? formatDuration(episode.duration) : "";
+}
+
+function skipRanges(episode) {
+  const ranges = [];
+  const opStart = Number(episode?.skip_op_start) || 0;
+  const opEnd = Number(episode?.skip_op_end) || 0;
+  if (opStart > 0 && opEnd > opStart) {
+    ranges.push({ from: opStart, to: opEnd, label: "跳过片头" });
+  }
+  const edStart = Number(episode?.skip_ed_start) || 0;
+  const edEnd = Number(episode?.skip_ed_end) || 0;
+  if (edStart > 0 && edEnd > edStart) {
+    ranges.push({ from: edStart, to: edEnd, label: "跳过片尾" });
+  }
+  return ranges;
 }
 
 async function renderDetail(root, ctx, seasonId) {
@@ -335,6 +758,7 @@ async function renderDetail(root, ctx, seasonId) {
       });
     }
     player.setTitle(label);
+    player.setSkipRanges(skipRanges(episode));
     player.showLoading();
 
     const token = ++episodeToken;

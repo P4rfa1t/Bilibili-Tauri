@@ -171,6 +171,12 @@ async function renderCurrent() {
 
   document.title = `${TITLES[info.name] || "发现"} - ${APP_NAME}`;
   setActiveNav(info.nav);
+  const immersive =
+    info.name === "video" ||
+    info.name === "dynamic" ||
+    (info.name === "live" && Boolean(info.params.roomId)) ||
+    (info.name === "bangumi" && Boolean(info.params.seasonId));
+  document.body.classList.toggle("search-fab-off", immersive);
   const main = document.getElementById("main");
   if (main) main.scrollTop = 0;
   const view = pageView();

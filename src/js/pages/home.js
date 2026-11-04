@@ -7,6 +7,7 @@ import {
   errorState,
   pageHead,
   skeletonGrid,
+  useRefreshFab,
   videoCard,
 } from "../ui.js";
 import {
@@ -111,16 +112,12 @@ export async function render(root, ctx) {
     ${pageHead({
       title,
       subtitle,
-      actions: `<button class="btn btn-sm btn-outline refresh-btn" data-refresh type="button">${icon(
-        "refresh-cw",
-        14
-      )}刷新</button>`,
     })}
     ${toolbarHtml(tab, rid)}
     <div id="home-results">${skeletonGrid(12)}</div>`;
 
   const results = root.querySelector("#home-results");
-  const refreshButton = root.querySelector("[data-refresh]");
+  const stopRefreshFab = useRefreshFab(() => ctx.refresh());
   let disposed = false;
   let page = 1;
   let count = 0;
@@ -131,12 +128,8 @@ export async function render(root, ctx) {
     disposed = true;
     loader?.remove();
     loader = null;
+    stopRefreshFab();
   };
-
-  root.querySelector("[data-refresh]")?.addEventListener("click", () => {
-    refreshButton?.classList.add("spinning");
-    ctx.refresh();
-  });
 
   const appendCards = (items, ranked) => {
     if (!items.length) return;

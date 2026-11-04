@@ -1,6 +1,7 @@
 mod api;
 mod commands;
 mod proxy;
+mod secure;
 
 use std::sync::Mutex;
 
@@ -23,7 +24,7 @@ pub fn run() {
                 .app_data_dir()
                 .unwrap_or_else(|_| std::path::PathBuf::from("."));
             let _ = std::fs::create_dir_all(&dir);
-            let store = CookieStore::load(&dir.join("cookies.json")).unwrap_or_default();
+            let store = CookieStore::load(&dir.join("cookies.dat")).unwrap_or_default();
             let proxy = proxy::start().expect("启动本地媒体代理失败");
             app.manage(AppState {
                 client: BilibiliClient::new(),
@@ -67,7 +68,9 @@ pub fn run() {
             commands::comment_add,
             commands::space_info,
             commands::space_videos,
+            commands::space_dynamics,
             commands::bangumi_list,
+            commands::bangumi_filters,
             commands::bangumi_detail,
             commands::live_feed,
             commands::live_areas,
@@ -75,13 +78,23 @@ pub fn run() {
             commands::live_room_detail,
             commands::live_play_info,
             commands::dynamic_feed,
+            commands::dynamic_like,
+            commands::dynamic_detail,
+            commands::dynamic_comments,
+            commands::dynamic_comment_add,
+            commands::dynamic_repost,
             commands::dynamic_uplist,
             commands::msg_feed,
             commands::msg_unread,
             commands::live_following,
+            commands::dynamic_emotes,
+            commands::dynamic_upload_image,
+            commands::dynamic_publish,
             commands::live_danmu_conf,
             commands::live_danmu_history,
+            commands::live_danmu_send,
             commands::open_url,
+            commands::open_web_window,
             commands::app_version,
             commands::open_player_window,
             commands::show_main_window,

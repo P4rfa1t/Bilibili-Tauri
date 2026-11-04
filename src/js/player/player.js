@@ -11,6 +11,7 @@ import { store } from "../store.js";
 import { SPEED_OPTIONS } from "../constants.js";
 import { clamp, escapeHtml, formatDuration, errorText } from "../utils.js";
 import { DanmakuEngine } from "./danmaku.js";
+import { DanmakuHover } from "./danmaku-hover.js";
 
 const IDLE_MS = 2600;
 const REPORT_MS = 15_000;
@@ -52,6 +53,9 @@ export class Player {
     this.subtitleLoader = null;
     this.activeSubtitle = "";
     this.cues = [];
+    this.danmakuItems = [];
+    this.skipRanges = [];
+    this.activeSkip = null;
 
     this.popup = null;
     this.popupAnchor = null;
@@ -73,6 +77,19 @@ export class Player {
     this.danmaku = new DanmakuEngine(this.root.querySelector(".danmaku-canvas"), {
       getTime: () => this.video.currentTime,
     });
+    this.danmakuHoverControl = new DanmakuHover({
+      engine: this.danmaku,
+      container: this.root,
+      button: this.danmakuCopy,
+      ignoreSelector:
+        ".player-controls, .player-top, .player-bigplay, .player-error, .player-loading, .player-toast",
+      onCopied: (ok) => this.showToast(ok ? "已复制弹幕" : "复制失败"),
+    });
+    this.heatObserver =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(() => this.drawHeatmap())
+        : null;
+    this.heatObserver?.observe(this.heatCanvas);
     this.configureDanmaku();
 
     this.video.playbackRate = Number(store.get("speed")) || 1;
@@ -95,6 +112,7 @@ export class Player {
         <div class="subtitle-layer"></div>
       </div>
       <div class="player-top"><div class="pt-title"></div></div>
+      <button class="player-skip" type="button" data-skip hidden></button>
       <button class="player-bigplay" type="button" data-act="play" aria-label="播放">
         ${icon("play", 30)}
       </button>
@@ -107,6 +125,7 @@ export class Player {
             <div class="progress-buffer"></div>
             <div class="progress-played"></div>
           </div>
+          <canvas class="progress-heat" data-progress-heat></canvas>
           <div class="progress-thumb"></div>
           <div class="progress-tooltip">00:00</div>
         </div>
@@ -157,6 +176,11 @@ export class Player {
             19
           )}</button>
         </div>
+      </div>
+      <div class="danmaku-hover" data-danmaku-hover hidden>
+        <button class="danmaku-copy" type="button" data-danmaku-copy title="复制弹幕">
+          ${icon("copy", 14)}<span>复制</span>
+        </button>
       </div>`;
 
     this.root = root;
@@ -167,6 +191,8 @@ export class Player {
     this.progressPlayed = root.querySelector(".progress-played");
     this.progressThumb = root.querySelector(".progress-thumb");
     this.progressTooltip = root.querySelector(".progress-tooltip");
+    this.heatCanvas = root.querySelector("[data-progress-heat]");
+    this.skipBtn = root.querySelector("[data-skip]");
     this.timeCurrent = root.querySelector(".player-time .current");
     this.timeDuration = root.querySelector(".player-time .duration");
     this.playBtn = root.querySelector('.controls-row [data-act="play"]');
@@ -184,6 +210,7 @@ export class Player {
     this.fullscreenBtn = root.querySelector('[data-act="fullscreen"]');
     this.subtitleEl = root.querySelector(".subtitle-layer");
     this.topTitle = root.querySelector(".pt-title");
+    this.danmakuCopy = root.querySelector("[data-danmaku-copy]");
     this.updateSpeedLabel();
   }
 
@@ -205,6 +232,7 @@ export class Player {
     this.onVideoError = () => this.handleVideoError();
     this.onAudioError = () => this.handleAudioError();
     this.onVideoSeeking = () => {
+      this.danmakuHoverControl?.hide();
       this.danmaku?.seek(this.video.currentTime);
       this.syncAudio(true);
     };
@@ -248,6 +276,12 @@ export class Player {
     this.root.querySelector('[data-act="quality"]').addEventListener("click", () => this.openQualityMenu());
     this.volumeBtn.addEventListener("click", () => this.toggleMute());
     this.fullscreenBtn.addEventListener("click", () => this.toggleFullscreen());
+    this.skipBtn?.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (!this.activeSkip) return;
+      this.seek(this.activeSkip.to + 0.05);
+      this.updateSkipButton();
+    });
     this.volumeInput.addEventListener("input", () => {
       this.setVolume(Number(this.volumeInput.value), false);
     });
@@ -424,6 +458,7 @@ export class Player {
     this.pendingStart = null;
     this.updateDuration();
     this.updateProgressUI();
+    this.drawHeatmap();
     const wantPlay = this.pendingAutoplay;
     this.pendingAutoplay = false;
     if (wantPlay) this.play();
@@ -626,6 +661,7 @@ export class Player {
   handleTimeUpdate() {
     this.updateProgressUI();
     this.updateSubtitleByTime();
+    this.updateSkipButton();
 
     if (this.hasAudio && !this.video.paused) {
       const drift = Math.abs(this.audio.currentTime - this.video.currentTime);
@@ -977,7 +1013,80 @@ export class Player {
   // ------------------------------------------------------------- danmaku
 
   setDanmaku(items) {
-    this.danmaku?.setData(items);
+    this.danmakuItems = Array.isArray(items) ? items : [];
+    this.danmaku?.setData(this.danmakuItems);
+    this.danmakuHoverControl?.hide();
+    this.drawHeatmap();
+  }
+
+  setSkipRanges(ranges) {
+    this.skipRanges = Array.isArray(ranges)
+      ? ranges.filter((item) => item && Number(item.to) > Number(item.from))
+      : [];
+    this.updateSkipButton();
+  }
+
+  updateSkipButton() {
+    if (!this.skipBtn) return;
+    const time = Number(this.video?.currentTime) || 0;
+    const active =
+      this.skipRanges.find(
+        (item) => time >= Number(item.from) && time < Number(item.to) - 0.3
+      ) || null;
+    this.activeSkip = active;
+    if (!active) {
+      this.skipBtn.hidden = true;
+      return;
+    }
+    this.skipBtn.hidden = false;
+    this.skipBtn.textContent = active.label || "跳过";
+  }
+
+  drawHeatmap() {
+    const canvas = this.heatCanvas;
+    const duration = Number(this.video?.duration) || 0;
+    const items = this.danmakuItems;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const enabled = store.get("danmakuHeat") !== false;
+    if (!enabled || !Number.isFinite(duration) || duration <= 0 || !items.length) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+
+    const width = Math.max(1, Math.round(canvas.clientWidth));
+    const height = Math.max(1, Math.round(canvas.clientHeight));
+    if (!width || !height) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (canvas.width !== Math.round(width * dpr) || canvas.height !== Math.round(height * dpr)) {
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    const buckets = new Array(Math.max(24, Math.min(180, Math.round(width / 4)))).fill(0);
+    for (const item of items) {
+      const time = Number(item?.time) || 0;
+      if (time < 0 || time > duration) continue;
+      const index = Math.min(
+        buckets.length - 1,
+        Math.floor((time / duration) * buckets.length)
+      );
+      buckets[index] += 1;
+    }
+    const max = Math.max(1, ...buckets);
+    const barWidth = width / buckets.length;
+    const gradient = ctx.createLinearGradient(0, height, 0, 0);
+    gradient.addColorStop(0, "rgba(251, 114, 153, 0.28)");
+    gradient.addColorStop(1, "rgba(251, 114, 153, 0.95)");
+    ctx.fillStyle = gradient;
+    buckets.forEach((count, index) => {
+      if (!count) return;
+      const barHeight = Math.max(1, (Math.sqrt(count) / Math.sqrt(max)) * height);
+      ctx.fillRect(index * barWidth, height - barHeight, Math.max(1, barWidth - 0.5), barHeight);
+    });
   }
 
   configureDanmaku() {
@@ -996,6 +1105,7 @@ export class Player {
     this.danmakuEnabled = Boolean(enabled);
     this.danmaku?.setEnabled(this.danmakuEnabled);
     store.set("danmaku", this.danmakuEnabled);
+    if (!this.danmakuEnabled) this.danmakuHoverControl?.hide();
     this.updateDanmakuButton();
   }
 
@@ -1221,6 +1331,8 @@ export class Player {
     clearTimeout(this.idleTimer);
     clearTimeout(this.toastTimer);
     this.closeFloating();
+    this.danmakuHoverControl?.destroy();
+    this.heatObserver?.disconnect();
     this.danmaku?.destroy();
     document.removeEventListener("pointerdown", this.onDocPointer, true);
     document.removeEventListener("fullscreenchange", this.onFullscreenChange);

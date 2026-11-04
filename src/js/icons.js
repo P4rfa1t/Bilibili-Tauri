@@ -92,6 +92,8 @@ const ICONS = {
   "arrow-right": '<path d="M5 12h14M12 5l7 7-7 7"/>',
   "arrow-up": '<path d="M12 19V5M5 12l7-7 7 7"/>',
   image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/>',
+  smile: '<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><path d="M9 9h.01M15 9h.01"/>',
+  "edit-3": '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   "more-horizontal": '<circle cx="5" cy="12" r="1" fill="currentColor"/><circle cx="12" cy="12" r="1" fill="currentColor"/><circle cx="19" cy="12" r="1" fill="currentColor"/>',
   "wifi-off": '<path d="M2 2l20 20"/><path d="M8.5 8.5A10.9 10.9 0 0 1 12 8c3.5 0 6.6 1.3 9 3.5M5 11.5A15.9 15.9 0 0 1 8 9.7M2 8.8A20.9 20.9 0 0 1 5.6 6.2M10.7 12.7A5 5 0 0 1 12 12.5c1 0 2 .3 2.8.9M12 20h.01"/>',
   loader: '<path d="M12 2v4M12 18v4M4.9 4.9l2.9 2.9M16.2 16.2l2.9 2.9M2 12h4M18 12h4M4.9 19.1l2.9-2.9M16.2 7.8l2.9-2.9"/>',

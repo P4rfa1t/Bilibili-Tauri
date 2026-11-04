@@ -1,11 +1,14 @@
 /**
- * 消息中心 —— 回复我的 / @我的 / 收到的赞 / 系统消息。
- *
- * 回复、@、赞三类都有分页列表；系统消息接口未开放，
- * 只展示未读计数并给一个跳转 B 站消息中心的入口。
+ * 消息中心 —— 回复我的 / @我的 / 收到的赞。
  */
 
-import { msgFeed, msgUnread, openExternal } from "../api.js";
+import {
+  msgFeed,
+  msgUnread,
+  openExternal,
+  openWebWindow,
+  videoDetail,
+} from "../api.js";
 import { icon } from "../icons.js";
 import { store } from "../store.js";
 import {
@@ -15,6 +18,7 @@ import {
   loginRequiredHTML,
   skeletonRows,
   toast,
+  useRefreshFab,
 } from "../ui.js";
 import {
   avatarTag,
@@ -29,14 +33,12 @@ const TABS = [
   { key: "reply", label: "回复我的", iconName: "message-square" },
   { key: "at", label: "提到我的", iconName: "at-sign" },
   { key: "like", label: "收到的赞", iconName: "heart" },
-  { key: "sys", label: "系统消息", iconName: "bell" },
 ];
 
 const KIND_LABEL = {
   reply: "回复了你",
   at: "提到了你",
   like: "赞了你",
-  sys: "系统通知",
 };
 
 function normalizeTab(value) {
@@ -47,7 +49,6 @@ function unreadOf(unread, tab) {
   if (!unread) return 0;
   if (tab === "at") return Number(unread.at) || 0;
   if (tab === "like") return Number(unread.like) || 0;
-  if (tab === "sys") return Number(unread.sys_msg) || 0;
   return Number(unread.reply) || 0;
 }
 
@@ -83,6 +84,14 @@ function bvidOf(uri) {
   return match ? match[1] : "";
 }
 
+function dynamicPageOf(uri) {
+  const raw = String(uri || "");
+  if (/t\.bilibili\.com\/\d+/i.test(raw)) return raw;
+  if (/\/opus\/\d+/i.test(raw)) return raw;
+  const match = raw.match(/bilibili:\/\/dynamic\/(\d+)/i);
+  return match ? `https://t.bilibili.com/${match[1]}` : "";
+}
+
 function itemHref(item) {
   const uri = String(item.uri || "");
   if (uri.startsWith("bilibili://")) return "";
@@ -90,13 +99,85 @@ function itemHref(item) {
   return "";
 }
 
-/** 原视频/原动态条目：标题 + BV 号，完全不依赖接口返回封面。 */
+/** 原视频条目：标题 + BV 号，封面按 BV 号懒加载。 */
+const coverCache = new Map();
+let coverObserver = null;
+
+function ensureCoverObserver() {
+  if (coverObserver || typeof IntersectionObserver === "undefined") return coverObserver;
+  coverObserver = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        const node = entry.target;
+        coverObserver.unobserve(node);
+        const bvid = node.dataset.msgCover || "";
+        if (!bvid) return;
+        const cached = coverCache.get(bvid);
+        if (cached) {
+          applyCover(node, cached);
+          return;
+        }
+        videoDetail(bvid)
+          .then((info) => {
+            const cover = String(info?.cover || "");
+            if (!cover) return;
+            coverCache.set(bvid, cover);
+            if (node.isConnected) applyCover(node, cover);
+          })
+          .catch(() => {});
+      });
+    },
+    { rootMargin: "200px" }
+  );
+  return coverObserver;
+}
+
+function applyCover(node, url) {
+  if (!node?.isConnected) return;
+  const span = document.createElement("span");
+  span.className = "msg-source-cover";
+  span.innerHTML = imgTag(url, { w: 120, h: 68, alt: "" });
+  node.replaceWith(span);
+}
+
+function hydrateCovers(container) {
+  const observer = ensureCoverObserver();
+  if (!observer) return;
+  container.querySelectorAll("[data-msg-cover]").forEach((node) => {
+    if (node.dataset.coverObserved === "1") return;
+    node.dataset.coverObserved = "1";
+    observer.observe(node);
+  });
+}
+
 function sourceHtml(item) {
   const title = String(item.title || "").trim();
   if (!title) return "";
   const bvid = bvidOf(item.uri);
+  const dynamicPage = dynamicPageOf(item.uri);
+  if (dynamicPage) {
+    const inner = `<span class="msg-source-icon">${icon("activity", 18)}</span>
+      <span class="msg-source-body">
+        <span class="msg-source-title">${escapeHtml(title)}</span>
+        <span class="msg-source-sub">动态</span>
+      </span>
+      <span class="msg-source-go">${icon("chevron-right", 14)}</span>`;
+    return `<button class="msg-source" type="button" data-open-web="${escapeAttr(
+      dynamicPage
+    )}">${inner}</button>`;
+  }
   const business = String(item.business || "").trim() || "视频";
-  const inner = `<span class="msg-source-icon">${icon("play-circle", 18)}</span>
+  const cover = String(item.cover || "").trim();
+  const leading = cover
+    ? `<span class="msg-source-cover">${imgTag(cover, { w: 120, h: 68, alt: "" })}</span>`
+    : bvid
+    ? `<span class="msg-source-icon" data-msg-cover="${escapeAttr(bvid)}">${icon(
+        "play-circle",
+        18
+      )}</span>`
+    : `<span class="msg-source-icon">${icon("play-circle", 18)}</span>`;
+  const inner = `${leading}
     <span class="msg-source-body">
       <span class="msg-source-title">${escapeHtml(title)}</span>
       <span class="msg-source-sub">${escapeHtml(business)}${
@@ -120,8 +201,10 @@ function messageCard(item) {
   const users = usersHtml(item.users);
   const count = Number(item.count) || 0;
   const image = String(item.image || "").trim();
+  const cover = String(item.cover || "").trim();
   // 回复正文常常与视频标题重复，重复时正文不再单独占一行
   const showContent = content && content !== title;
+  const showImage = image && image !== cover;
   const meta = `<div class="msg-meta">
       <span class="msg-kind">${icon(
         item.kind === "like" ? "heart" : item.kind === "at" ? "at-sign" : "message-square",
@@ -135,7 +218,7 @@ function messageCard(item) {
   return `<article class="msg-card">${users}${
     showContent ? `<div class="msg-content">${escapeHtml(content)}</div>` : ""
   }${sourceHtml(item)}${
-    image ? `<div class="msg-image">${imgTag(image, { w: 240, h: 140, alt: "" })}</div>` : ""
+    showImage ? `<div class="msg-image">${imgTag(image, { w: 240, h: 140, alt: "" })}</div>` : ""
   }${meta}</article>`;
 }
 
@@ -148,6 +231,7 @@ async function renderList(root, ctx, tab, body) {
   const append = (items) => {
     if (!items.length) return;
     body.insertAdjacentHTML("beforeend", items.map(messageCard).join(""));
+    hydrateCovers(body);
   };
 
   const loadMore = async () => {
@@ -194,20 +278,6 @@ async function renderList(root, ctx, tab, body) {
   };
 }
 
-function renderSystem(body, unread) {
-  const count = Number(unread?.sys_msg) || 0;
-  body.innerHTML = emptyState(
-    count > 0 ? `有 ${count} 条未读系统消息` : "暂时没有系统消息",
-    "B 站的系统消息接口未对外开放，这里只同步未读计数，点下面的按钮去网页版查看。",
-    `<button class="btn btn-primary" type="button" data-open-msg-center>${icon(
-      "external-link",
-      15
-    )}打开 B 站消息中心</button>`,
-    "bell"
-  );
-  return () => {};
-}
-
 export async function render(root, ctx) {
   const onAuth = () => ctx.refresh();
   window.addEventListener("app:auth", onAuth);
@@ -220,15 +290,12 @@ export async function render(root, ctx) {
 
   const tab = normalizeTab(ctx.query.get("tab"));
 
+  const stopRefreshFab = useRefreshFab(() => ctx.refresh());
+
   root.innerHTML = `<div class="page-head">
       <div>
         <h1 class="page-title">消息</h1>
         <p class="page-subtitle" data-msg-sub>正在读取未读消息…</p>
-      </div>
-      <div class="page-actions">
-        <button class="btn btn-sm btn-outline" type="button" data-refresh>
-          ${icon("refresh-cw", 14)}刷新
-        </button>
       </div>
     </div>
     ${tabsHtml(tab, null)}
@@ -238,8 +305,6 @@ export async function render(root, ctx) {
   const sub = root.querySelector("[data-msg-sub]");
   const tabsHolder = root.querySelector(".msg-tabs");
 
-  root.querySelector("[data-refresh]")?.addEventListener("click", () => ctx.refresh());
-
   root.addEventListener("click", async (event) => {
     if (!event.target.closest("[data-open-msg-center]")) return;
     const ok = await openExternal("https://message.bilibili.com/");
@@ -248,6 +313,16 @@ export async function render(root, ctx) {
 
   // 外链消息用系统浏览器打开
   body.addEventListener("click", async (event) => {
+    const dynamic = event.target.closest("[data-open-web]");
+    if (dynamic) {
+      event.preventDefault();
+      try {
+        await openWebWindow(dynamic.dataset.openWeb || "", "动态");
+      } catch (error) {
+        toast(errorText(error), "error");
+      }
+      return;
+    }
     const link = event.target.closest("[data-external]");
     if (!link) return;
     event.preventDefault();
@@ -271,13 +346,11 @@ export async function render(root, ctx) {
   }
   if (tabsHolder) tabsHolder.outerHTML = tabsHtml(tab, unread);
 
-  const cleanup =
-    tab === "sys"
-      ? renderSystem(body, unread)
-      : await renderList(root, ctx, tab, body);
+  const cleanup = await renderList(root, ctx, tab, body);
 
   return () => {
     detachAuth();
+    stopRefreshFab();
     if (typeof cleanup === "function") cleanup();
   };
 }

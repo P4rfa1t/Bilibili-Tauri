@@ -39,8 +39,8 @@ export function homeFeed(kind = "popular", pn = 1, rid = 0) {
   return call("home_feed", { kind, pn, rid });
 }
 
-export function search(keyword, page = 1, kind = "video", order = "totalrank") {
-  return call("search", { keyword, page, kind, order });
+export function search(keyword, page = 1, kind = "video", order = "totalrank", duration = "all") {
+  return call("search", { keyword, page, kind, order, duration });
 }
 
 export function searchSuggest(keyword) {
@@ -173,8 +173,8 @@ export function commentReplies(aid, rpid, page = 1) {
   return call("comment_replies", { aid, rpid, page });
 }
 
-export function commentAdd(aid, message, root = 0) {
-  return call("comment_add", { aid, message, root });
+export function commentAdd(aid, message, root = 0, parent = 0) {
+  return call("comment_add", { aid, message, root, parent });
 }
 
 export function spaceInfo(mid) {
@@ -185,10 +185,18 @@ export function spaceVideos(mid, page = 1) {
   return call("space_videos", { mid, page });
 }
 
+export function spaceDynamics(mid, offset = "") {
+  return call("space_dynamics", { mid, offset });
+}
+
 // ---------------- Bangumi ----------------
 
-export function bangumiList(page = 1, seasonType = 1) {
-  return call("bangumi_list", { page, seasonType });
+export function bangumiList(page = 1, seasonType = 1, filters = {}) {
+  return call("bangumi_list", { page, seasonType, filters });
+}
+
+export function bangumiFilters(seasonType = 1) {
+  return call("bangumi_filters", { seasonType });
 }
 
 export function bangumiDetail(seasonId) {
@@ -224,6 +232,26 @@ export function dynamicFeed(kind = "all", offset = "") {
   return call("dynamic_feed", { kind, offset });
 }
 
+export function dynamicLike(dynId, like = true) {
+  return call("dynamic_like", { dynId: String(dynId), like });
+}
+
+export function dynamicDetail(dynId) {
+  return call("dynamic_detail", { dynId: String(dynId) });
+}
+
+export function dynamicComments(dynId, commentType = 17, page = 1, sort = "hot") {
+  return call("dynamic_comments", { dynId, commentType, page, sort });
+}
+
+export function dynamicCommentAdd(dynId, commentType = 17, message = "", root = 0) {
+  return call("dynamic_comment_add", { dynId, commentType, message, root });
+}
+
+export function dynamicRepost(dynId, content = "") {
+  return call("dynamic_repost", { dynId: String(dynId), content });
+}
+
 /** 消息列表。kind 为 reply（回复我的）/ at（@我的）/ like（收到的赞）。 */
 export function msgFeed(kind = "reply", cursorId = 0, cursorTime = 0) {
   return call("msg_feed", { kind, cursorId, cursorTime });
@@ -236,6 +264,21 @@ export function msgUnread() {
 /** 动态页左栏：有更新的 UP 主（需要登录）。 */
 export function dynamicUplist() {
   return call("dynamic_uplist");
+}
+
+/** 动态发布面板的官方表情包。 */
+export function dynamicEmotes() {
+  return call("dynamic_emotes");
+}
+
+/** 上传动态配图，返回 { url, width, height }。 */
+export function dynamicUploadImage(data, filename, contentType) {
+  return call("dynamic_upload_image", { data, filename, contentType });
+}
+
+/** 发布图文动态。 */
+export function dynamicPublish(content, pics = [], atUids = []) {
+  return call("dynamic_publish", { content, pics, atUids });
 }
 
 /** 动态页右栏：关注的 UP 主正在直播（需要登录）。 */
@@ -253,10 +296,19 @@ export function liveDanmuHistory(roomId) {
   return call("live_danmu_history", { roomId });
 }
 
+/** 在直播间发送弹幕。 */
+export function liveDanmuSend(roomId, message) {
+  return call("live_danmu_send", { roomId, message });
+}
+
 // ---------------- Misc ----------------
 
 export function openUrl(url) {
   return call("open_url", { url });
+}
+
+export function openWebWindow(url, title = "") {
+  return call("open_web_window", { url, title });
 }
 
 export function appVersion() {

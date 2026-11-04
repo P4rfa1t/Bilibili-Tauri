@@ -54,6 +54,14 @@ export const SEARCH_ORDERS = [
   { value: "stow", label: "最多收藏" },
 ];
 
+export const SEARCH_DURATIONS = [
+  { value: "all", label: "全部时长" },
+  { value: "1", label: "10 分钟以下" },
+  { value: "2", label: "10-30 分钟" },
+  { value: "3", label: "30-60 分钟" },
+  { value: "4", label: "60 分钟以上" },
+];
+
 export const RANKING_CATEGORIES = [
   { rid: 0, label: "全站" },
   { rid: 1, label: "动画" },

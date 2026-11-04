@@ -6,13 +6,13 @@
  */
 
 import { recommendFeed } from "../api.js";
-import { icon } from "../icons.js";
 import {
   createInfiniteLoader,
   emptyState,
   errorState,
   pageHead,
   skeletonGrid,
+  useRefreshFab,
   videoCard,
 } from "../ui.js";
 import { errorText } from "../utils.js";
@@ -25,24 +25,20 @@ export async function render(root, ctx) {
   pendingStart = 0;
   let freshIdx = startFrom || 1;
 
+  const refresh = () => {
+    pendingStart = freshIdx;
+    ctx.refresh();
+  };
+  const stopRefreshFab = useRefreshFab(refresh);
+
   root.innerHTML = `
     ${pageHead({
       title: "推荐",
       subtitle: "哔哩哔哩官方推荐流，按你的口味持续刷新。",
-      actions: `<button class="btn btn-sm btn-outline refresh-btn" data-refresh type="button">${icon(
-        "refresh-cw",
-        14
-      )}换一批</button>`,
     })}
-    <div class="rec-toolbar">
-      <span class="rec-chip static">${icon("compass", 13)}第 <b data-idx>${freshIdx}</b> 批</span>
-      <span class="controls-spacer"></span>
-      <span class="rec-hint">下拉自动加载更多</span>
-    </div>
     <div id="rec-results">${skeletonGrid(12)}</div>`;
 
   const results = root.querySelector("#rec-results");
-  const idxEl = root.querySelector("[data-idx]");
 
   let disposed = false;
   let loader = null;
@@ -52,12 +48,8 @@ export async function render(root, ctx) {
     disposed = true;
     loader?.remove();
     loader = null;
+    stopRefreshFab();
   };
-
-  root.querySelector("[data-refresh]")?.addEventListener("click", () => {
-    pendingStart = freshIdx;
-    ctx.refresh();
-  });
 
   const ensureGrid = () => {
     if (grid) return grid;
@@ -91,7 +83,6 @@ export async function render(root, ctx) {
       }
       if (disposed) return { items: [], hasMore: false };
       freshIdx = batchIdx + 1;
-      if (idxEl) idxEl.textContent = String(freshIdx);
       if ((data.items || []).length || !data.has_more) {
         return { items: data.items || [], hasMore: Boolean(data.has_more) };
       }

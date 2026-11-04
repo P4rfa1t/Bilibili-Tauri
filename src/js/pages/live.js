@@ -1,5 +1,6 @@
 import {
   liveAreas,
+  liveDanmuSend,
   liveFeed,
   livePlayInfo,
   liveRoomDetail,
@@ -7,6 +8,9 @@ import {
   openUrl,
 } from "../api.js";
 import { icon } from "../icons.js";
+import { insertIntoTextarea } from "../editor.js";
+import { mountEmotePicker, renderEmoteText } from "../emotes.js";
+import { ensureLogin } from "../login.js";
 import { mpegtsConfig, orderLiveUrls } from "../media.js";
 import { LiveDanmaku } from "../player/live-danmaku.js";
 import { store } from "../store.js";
@@ -18,6 +22,7 @@ import {
   skeletonPlayer,
   skeletonRows,
   toast,
+  useRefreshFab,
 } from "../ui.js";
 import {
   errorText,
@@ -103,7 +108,7 @@ function liveHero(room) {
         <span>${avatarTag(room.face, room.uname, "avatar avatar-sm")}${escapeHtml(
     room.uname || "未知主播"
   )}</span>
-        <span>${icon("eye", 14)}${formatCount(room.online)} 人气</span>
+        <span>${icon("eye", 14)}人气 ${formatCount(room.online)}</span>
       </div>
       <span class="btn btn-glass live-hero-btn">${icon("play", 15)}进入直播间</span>
     </div>
@@ -319,9 +324,7 @@ function roomBadge(detail, play) {
 
 function roomMeta(detail, play) {
   const parts = [];
-  if (detail.online) {
-    parts.push(`<span>${icon("eye", 14)}${formatCount(detail.online)} 人气</span>`);
-  }
+  parts.push(`<span data-room-online>${icon("eye", 14)}在线观看 --</span>`);
   if (detail.attention) {
     parts.push(`<span>${icon("user", 14)}${formatCount(detail.attention)} 关注</span>`);
   }
@@ -384,6 +387,11 @@ function playerShellHtml(play, cover) {
             poster="${escapeAttr(cover || "")}"
           ></video>
           <canvas class="live-danmaku-canvas" data-live-danmaku></canvas>
+          <div class="danmaku-hover" data-danmaku-hover hidden>
+            <button class="danmaku-copy" type="button" data-live-danmaku-copy title="复制弹幕">
+              ${icon("copy", 14)}<span>复制</span>
+            </button>
+          </div>
           <div class="live-player-overlay" data-live-overlay>
             <span class="live-connecting"><span class="spinner"></span>正在加载直播间…</span>
           </div>
@@ -412,13 +420,13 @@ function appendChat(root, entry) {
   } else if (entry.kind === "gift") {
     row.innerHTML = `<span class="live-chat-user">${escapeHtml(
       entry.uname || ""
-    )}</span><span class="live-chat-sep">：</span><span class="live-chat-text live-chat-gift-text">${escapeHtml(
+    )}</span><span class="live-chat-sep">：</span><span class="live-chat-text live-chat-gift-text">${renderEmoteText(
       entry.text
     )}</span>`;
   } else if (entry.kind === "superchat") {
     row.innerHTML = `<span class="live-chat-sc">¥${Number(entry.price) || 0}</span><span class="live-chat-user">${escapeHtml(
       entry.uname || ""
-    )}</span><span class="live-chat-sep">：</span><span class="live-chat-text">${escapeHtml(
+    )}</span><span class="live-chat-sep">：</span><span class="live-chat-text">${renderEmoteText(
       entry.text
     )}</span>`;
   } else {
@@ -433,7 +441,7 @@ function appendChat(root, entry) {
     const admin = entry.isAdmin ? `<span class="live-chat-admin">房管</span>` : "";
     row.innerHTML = `${medal}${admin}<span class="live-chat-user">${escapeHtml(
       entry.uname || "游客"
-    )}</span><span class="live-chat-sep">：</span><span class="live-chat-text">${escapeHtml(
+    )}</span><span class="live-chat-sep">：</span><span class="live-chat-text">${renderEmoteText(
       entry.text || ""
     )}</span>`;
   }
@@ -452,12 +460,19 @@ function mountPlayer(root, ctx, detail, play, roomId) {
   if (canvas && Number(detail?.live_status) === 1) {
     danmaku = new LiveDanmaku(canvas, {
       roomId: Number(detail.room_id) || roomId,
-      onStatus: (status, message) => paintDanmakuStatus(root, status, message),
-      onChat: (entry) => appendChat(root, entry),
-      onPopularity: (value) => {
-        const node = root.querySelector("[data-live-online]");
-        if (node) node.textContent = `${formatCount(value)} 人气`;
+      onStatus: (status, message) => {
+        paintChatStatus(root, status, message);
       },
+      onChat: (entry) => appendChat(root, entry),
+      onOnline: (value) => {
+        const text = `在线观看 ${formatCount(value)}`;
+        root
+          .querySelectorAll("[data-live-online], [data-room-online]")
+          .forEach((node) => {
+            node.textContent = text;
+          });
+      },
+      onCopied: (ok) => toast(ok ? "已复制弹幕" : "复制失败", ok ? "success" : "error"),
     });
     root.__liveDanmaku = danmaku;
   }
@@ -468,19 +483,19 @@ function mountPlayer(root, ctx, detail, play, roomId) {
   };
 }
 
-const DANMAKU_STATUS = {
-  idle: "弹幕待命",
-  connecting: "弹幕连接中",
-  live: "弹幕已连接",
-  closed: "弹幕已断开",
-  error: "弹幕连接失败",
+const CHAT_STATUS = {
+  idle: "弹幕已关闭",
+  connecting: "正在连接弹幕服务器…",
+  live: "弹幕已连接，等待观众发言…",
+  closed: "弹幕连接已断开，正在重连…",
+  error: "弹幕连接失败，正在重试…",
 };
 
-function paintDanmakuStatus(root, status, message) {
-  const node = root.querySelector("[data-danmu-status]");
-  if (!node) return;
-  node.textContent = message || DANMAKU_STATUS[status] || "弹幕待命";
-  node.dataset.state = status;
+function paintChatStatus(root, status, message) {
+  const list = root.querySelector("[data-live-chat]");
+  if (!list || list.querySelector(".live-chat-row")) return;
+  const empty = list.querySelector("[data-live-chat-empty]");
+  if (empty) empty.textContent = message || CHAT_STATUS[status] || "正在连接弹幕服务器…";
 }
 
 function initPlayer(root, ctx, detail, play) {
@@ -671,7 +686,7 @@ async function renderRoom(root, ctx, roomId) {
             ? `<button class="btn btn-sm btn-outline live-danmu-toggle" data-danmu-toggle type="button">
                 ${icon("message-square", 14)}<span data-danmu-label>${
                   store.get("danmaku") === false ? "弹幕已关" : "弹幕已开"
-                }</span><span class="live-danmu-state" data-danmu-status data-state="idle">弹幕待命</span>
+                }</span>
               </button>`
             : ""
         }
@@ -744,13 +759,29 @@ async function renderRoom(root, ctx, roomId) {
         <div class="live-chat" data-live-chat-panel>
           <div class="live-chat-head">
             <span class="live-chat-title">${icon("message-square", 14)}观众发言</span>
-            <span class="live-chat-online" data-live-online>${formatCount(
-              detail.online
-            )} 人气</span>
+            <span class="live-chat-online" data-live-online>在线观看 --</span>
           </div>
           <div class="live-chat-list" data-live-chat>
             <div class="live-chat-empty" data-live-chat-empty>正在连接弹幕服务器…</div>
           </div>
+          <form class="live-chat-compose" data-live-compose>
+            <div class="live-chat-compose-row">
+              <input
+                class="input"
+                type="text"
+                maxlength="20"
+                placeholder="发个弹幕…"
+                autocomplete="off"
+                data-live-input
+                aria-label="弹幕内容"
+              />
+              <button class="live-chat-emoji" type="button" data-live-emoji title="表情" aria-label="表情">
+                ${icon("smile", 18)}
+              </button>
+              <button class="btn btn-primary btn-sm" type="submit" data-live-send>发送</button>
+            </div>
+            <div class="emote-picker live-emote-picker" data-live-emote-picker hidden></div>
+          </form>
         </div>
       </aside>
     </div>
@@ -763,6 +794,43 @@ async function renderRoom(root, ctx, roomId) {
         toast(errorText(error), "error");
       });
     });
+  });
+
+  // 发送弹幕
+  const compose = root.querySelector("[data-live-compose]");
+  const composeInput = compose?.querySelector("[data-live-input]");
+  const sendBtn = compose?.querySelector("[data-live-send]");
+  const emotePanel = compose?.querySelector("[data-live-emote-picker]");
+  compose?.querySelector("[data-live-emoji]")?.addEventListener("click", () => {
+    if (!emotePanel) return;
+    emotePanel.hidden = !emotePanel.hidden;
+    if (emotePanel.hidden || emotePanel.dataset.ready === "1") return;
+    emotePanel.dataset.ready = "1";
+    mountEmotePicker(emotePanel, (emote) => insertIntoTextarea(composeInput, emote.text));
+  });
+  compose?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const text = String(composeInput?.value || "").trim();
+    if (!text) {
+      composeInput?.focus();
+      return;
+    }
+    if (!ensureLogin("登录后才能发送弹幕")) {
+      composeInput?.blur();
+      return;
+    }
+    if (sendBtn) sendBtn.disabled = true;
+    try {
+      await liveDanmuSend(Number(detail.room_id) || roomId, text);
+      if (composeInput) composeInput.value = "";
+      if (emotePanel) emotePanel.hidden = true;
+      toast("弹幕已发送", "success");
+    } catch (error) {
+      toast(errorText(error), "error");
+    } finally {
+      if (sendBtn) sendBtn.disabled = false;
+      composeInput?.focus();
+    }
   });
 
   let stopPlayback = mountPlayer(root, ctx, detail, play, roomId);
@@ -840,7 +908,6 @@ async function renderRoom(root, ctx, roomId) {
     danmuToggle.classList.toggle("off", !next);
     // 就地开关，避免重连 WebSocket
     root.__liveDanmaku?.setEnabled(next);
-    if (!next) paintDanmakuStatus(root, "idle", "弹幕已关闭");
   });
 
   // 设置页改透明度 / 字号 / 速度 / 显示区域时，直播间里立刻生效
@@ -877,20 +944,16 @@ export async function render(root, ctx) {
     ${pageHead({
       title: "直播",
       subtitle: "看看正在直播的 UP 主，或者按分区发现新主播。",
-      actions: `<button class="btn btn-sm btn-outline refresh-btn" data-refresh type="button">${icon(
-        "refresh-cw",
-        14
-      )}刷新</button>`,
     })}
     ${toolbar(tab)}
     <div id="live-body"></div>`;
 
-  root.querySelector("[data-refresh]")?.addEventListener("click", () => ctx.refresh());
+  const stopRefreshFab = useRefreshFab(() => ctx.refresh());
 
   if (tab === "areas") {
     await renderAreas(root, ctx);
   } else {
     await renderFeed(root, ctx);
   }
-  return () => {};
+  return () => stopRefreshFab();
 }
